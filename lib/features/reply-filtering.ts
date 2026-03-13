@@ -152,32 +152,38 @@ function wrapMedia(article: HTMLElement) {
   mediaContainer.parentElement!.insertBefore(btn, mediaContainer);
 }
 
-function collapseReply(article: HTMLElement, likes: number, threshold: number) {
+function collapseReply(article: HTMLElement, reason: string) {
   if (article.hasAttribute(ENGAGEMENT_MARKER)) return;
 
   article.setAttribute(ENGAGEMENT_MARKER, "true");
 
-  // Find the tweet text and everything after it to collapse
-  const tweetText = article.querySelector<HTMLElement>(
-    '[data-testid="tweetText"]'
+  // Hide avatar
+  const avatar = article.querySelector<HTMLElement>(
+    '[data-testid="Tweet-User-Avatar"]'
   );
-  if (!tweetText) {
-    console.log(LOG, "collapseReply: no tweetText found");
+  if (avatar) avatar.classList.add("xes-collapse-hidden");
+
+  const contentToHide: HTMLElement[] = [];
+  const userName = article.querySelector<HTMLElement>('[data-testid="User-Name"]');
+  if (!userName) {
+    console.log(LOG, "collapseReply: no User-Name found");
     return;
   }
 
-  // Collect elements to hide: tweetText and all subsequent siblings,
-  // plus any media, cards, and action bars below the username area
-  const contentToHide: HTMLElement[] = [];
-  let el: HTMLElement | null = tweetText;
+  // Hide display name (first child), keep handle row (second child) visible
+  const displayNameRow = userName.children[0] as HTMLElement | undefined;
+  if (displayNameRow) displayNameRow.classList.add("xes-collapse-hidden");
 
-  // Walk up to the direct child of the content column that contains tweetText
-  while (el && el.parentElement && el.parentElement !== article) {
-    const parent = el.parentElement;
-    // Find the right level: the parent that contains both user info and content
-    const hasTweetText = parent.querySelector('[data-testid="tweetText"]');
-    const hasUserName = parent.querySelector('[data-testid="User-Name"]');
-    if (hasTweetText && hasUserName) {
+  // Walk up from User-Name to find the content column (has both User-Name and tweet content)
+  let contentCol: HTMLElement | null = userName;
+  while (contentCol && contentCol !== article) {
+    const parent = contentCol.parentElement;
+    if (!parent || parent === article) break;
+    if (
+      parent.querySelector('[data-testid="User-Name"]') &&
+      (parent.querySelector('[data-testid="tweetText"]') ||
+       parent.querySelector('[data-testid="reply"]'))
+    ) {
       // Hide everything after the User-Name row
       let foundUserRow = false;
       for (const child of parent.children) {
@@ -194,7 +200,7 @@ function collapseReply(article: HTMLElement, likes: number, threshold: number) {
       }
       break;
     }
-    el = parent;
+    contentCol = parent;
   }
 
   if (contentToHide.length === 0) {
@@ -202,28 +208,36 @@ function collapseReply(article: HTMLElement, likes: number, threshold: number) {
     return;
   }
 
-  console.log(LOG, "Collapsing reply:", likes, "likes, threshold:", Math.ceil(threshold), "hiding", contentToHide.length, "elements");
+  console.log(LOG, "Collapsing reply:", reason, "hiding", contentToHide.length, "elements");
 
   for (const node of contentToHide) {
-    node.classList.add("xes-engagement-hidden");
+    node.classList.add("xes-collapse-hidden");
   }
 
-  // Insert summary button after the last visible element
-  const firstHidden = contentToHide[0];
+  // Insert inline "Show Reply (XX)" button next to the timestamp
+  const timeEl = article.querySelector("time");
+  const timeContainer = timeEl?.closest("a")?.parentElement;
+  if (!timeContainer) {
+    console.log(LOG, "collapseReply: no time container found");
+    return;
+  }
+
   const btn = document.createElement("button");
   btn.className = "xes-show-reply-btn";
-  btn.textContent = `Low engagement (${likes} ${likes === 1 ? "like" : "likes"}, need ${Math.ceil(threshold)}) · Show reply`;
+  btn.innerHTML = `Show Reply <span class="xes-collapse-reason">(${reason})</span>`;
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     e.preventDefault();
+    if (avatar) avatar.classList.remove("xes-collapse-hidden");
+    if (displayNameRow) displayNameRow.classList.remove("xes-collapse-hidden");
     for (const node of contentToHide) {
-      node.classList.remove("xes-engagement-hidden");
+      node.classList.remove("xes-collapse-hidden");
     }
     btn.remove();
     article.setAttribute(ENGAGEMENT_MARKER, "revealed");
   });
 
-  firstHidden.parentElement!.insertBefore(btn, firstHidden);
+  timeContainer.parentElement!.insertBefore(btn, timeContainer.nextSibling);
 }
 
 function processArticle(article: HTMLElement) {
@@ -253,7 +267,7 @@ function processArticle(article: HTMLElement) {
       if (tweetData) {
         if (tweetData.favorite_count < minLikes) {
           console.log(LOG, "Filtering:", userData.screenName, "likes:", tweetData.favorite_count, "< threshold:", Math.ceil(minLikes));
-          collapseReply(article, tweetData.favorite_count, minLikes);
+          collapseReply(article, "LE");
         }
       }
     }
@@ -283,8 +297,7 @@ function injectStyles() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-    .xes-show-media-btn,
-    .xes-show-reply-btn {
+    .xes-show-media-btn {
       display: block;
       width: 100%;
       padding: 12px;
@@ -297,11 +310,26 @@ function injectStyles() {
       cursor: pointer;
       text-align: center;
     }
-    .xes-show-media-btn:hover,
-    .xes-show-reply-btn:hover {
+    .xes-show-media-btn:hover {
       background: rgba(255, 255, 255, 0.03);
     }
-    .xes-engagement-hidden {
+    .xes-show-reply-btn {
+      border: none;
+      background: transparent;
+      color: rgb(139, 152, 165);
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 0;
+      margin-left: 4px;
+    }
+    .xes-show-reply-btn:hover {
+      text-decoration: underline;
+    }
+    .xes-collapse-reason {
+      font-weight: 400;
+    }
+    .xes-collapse-hidden {
       display: none !important;
     }
   `;
@@ -342,7 +370,7 @@ function cleanupAll() {
         });
     });
 
-  // Restore engagement-hidden articles
+  // Restore collapsed articles
   document
     .querySelectorAll<HTMLElement>(`[${ENGAGEMENT_MARKER}]`)
     .forEach((article) => {
@@ -351,8 +379,8 @@ function cleanupAll() {
         .querySelectorAll<HTMLElement>(".xes-show-reply-btn")
         .forEach((btn) => btn.remove());
       article
-        .querySelectorAll<HTMLElement>(".xes-engagement-hidden")
-        .forEach((el) => el.classList.remove("xes-engagement-hidden"));
+        .querySelectorAll<HTMLElement>(".xes-collapse-hidden")
+        .forEach((el) => el.classList.remove("xes-collapse-hidden"));
     });
 
   // Clear skipped markers
