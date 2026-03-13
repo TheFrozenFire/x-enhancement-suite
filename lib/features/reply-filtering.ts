@@ -20,6 +20,11 @@ let minViewsThreshold = 10000;
 let hideShortReplies = true;
 let minWordCount = 10;
 
+// Runtime state
+let filtersVisible = false;
+let filteredCount = 0;
+let toggleBtn: HTMLElement | null = null;
+
 // Cached focal tweet view count (per page)
 let focalViews: number | null = null;
 let lastPath = "";
@@ -80,6 +85,9 @@ function cacheFocalViews() {
     console.log(LOG, "Path changed:", lastPath, "→", currentPath);
     lastPath = currentPath;
     focalViews = null;
+    filteredCount = 0;
+    toggleBtn?.remove();
+    toggleBtn = null;
   }
 
   // Already cached
@@ -240,6 +248,57 @@ function collapseReply(article: HTMLElement, reason: string) {
   });
 
   timeContainer.parentElement!.insertBefore(btn, timeContainer.nextSibling);
+
+  filteredCount++;
+  updateToggleButton();
+}
+
+function updateToggleButton() {
+  if (toggleBtn) {
+    toggleBtn.textContent = filtersVisible
+      ? `Hide Filtered Replies (${filteredCount})`
+      : `Show Filtered Replies (${filteredCount})`;
+  }
+}
+
+function insertToggleButton() {
+  if (!window.location.pathname.includes("/status/")) return;
+
+  // Already in DOM — nothing to do
+  if (toggleBtn?.isConnected) return;
+
+  // Find the focal tweet's cell and append button inside it.
+  // X uses position:absolute + translateY on each cellInnerDiv,
+  // so inserting a sibling would float to the container top.
+  const articles = document.querySelectorAll<HTMLElement>(
+    'article[data-testid="tweet"]'
+  );
+  let focalCell: HTMLElement | null = null;
+  for (const article of articles) {
+    if (isFocalTweet(article)) {
+      focalCell = article.closest<HTMLElement>('[data-testid="cellInnerDiv"]');
+      break;
+    }
+  }
+  if (!focalCell) return;
+
+  // Reuse existing button element to preserve state, or create new one
+  if (!toggleBtn) {
+    toggleBtn = document.createElement("div");
+    toggleBtn.className = "xes-toggle-filtered-btn";
+    toggleBtn.setAttribute("role", "button");
+    toggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      filtersVisible = !filtersVisible;
+      document.body.classList.toggle("xes-show-filtered", filtersVisible);
+      updateToggleButton();
+    });
+  }
+  updateToggleButton();
+
+  focalCell.appendChild(toggleBtn);
+  console.log(LOG, "Inserted toggle button inside focal cell");
 }
 
 function processArticle(article: HTMLElement) {
@@ -308,6 +367,8 @@ function processNodes(root: Element | Document) {
   for (const article of articles) {
     processArticle(article);
   }
+
+  insertToggleButton();
 }
 
 function injectStyles() {
@@ -349,6 +410,27 @@ function injectStyles() {
     }
     .xes-collapse-hidden {
       display: none !important;
+    }
+    /* Hide entire cell containing a filtered reply unless toggle is active */
+    body:not(.xes-show-filtered) [data-testid="cellInnerDiv"]:has([data-xes-low-engagement="true"]) {
+      display: none !important;
+    }
+    .xes-toggle-filtered-btn {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      border: none;
+      border-bottom: 1px solid rgb(56, 68, 77);
+      background: transparent;
+      color: rgb(29, 155, 240);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+    }
+    .xes-toggle-filtered-btn:hover {
+      background: rgba(29, 155, 240, 0.1);
     }
   `;
   document.head.appendChild(style);
@@ -405,6 +487,13 @@ function cleanupAll() {
   document
     .querySelectorAll<HTMLElement>(`[${SKIPPED_MARKER}]`)
     .forEach((article) => article.removeAttribute(SKIPPED_MARKER));
+
+  // Remove toggle button and body class
+  document.body.classList.remove("xes-show-filtered");
+  toggleBtn?.remove();
+  toggleBtn = null;
+  filteredCount = 0;
+  filtersVisible = false;
 
   focalViews = null;
   lastPath = "";
