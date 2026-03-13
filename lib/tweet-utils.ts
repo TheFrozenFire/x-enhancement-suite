@@ -1,7 +1,12 @@
 /**
- * Utilities for extracting data from X/Twitter tweet DOM elements
- * via React fiber internals.
+ * Utilities for extracting data from X/Twitter tweet DOM elements.
+ *
+ * Data is read from the `data-xes-tweet-data` attribute set by the
+ * MAIN world fiber-bridge content script, since the ISOLATED world
+ * content script cannot access React fiber internals.
  */
+
+const DATA_ATTR = "data-xes-tweet-data";
 
 export interface TweetUserData {
   screenName: string;
@@ -9,57 +14,64 @@ export interface TweetUserData {
   followedBy: boolean;
 }
 
-/**
- * Walk the React fiber tree to find a prop by key.
- */
-function findFiberProp(
-  fiber: any,
-  targetKey: string,
-  depth = 0,
-  maxDepth = 50
-): any {
-  if (!fiber || depth > maxDepth) return null;
+export interface TweetData {
+  id_str: string;
+  favorite_count: number;
+  retweet_count: number;
+  reply_count: number;
+  views_count: number | null;
+}
+
+interface BridgeData {
+  id_str: string;
+  favorite_count: number;
+  retweet_count: number;
+  reply_count: number;
+  views_count: number | null;
+  screen_name: string;
+  following: boolean;
+  followed_by: boolean;
+}
+
+function readBridgeData(article: HTMLElement): BridgeData | null {
+  const json = article.getAttribute(DATA_ATTR);
+  if (!json) return null;
   try {
-    const props = fiber.memoizedProps;
-    if (props && props[targetKey]) return props[targetKey];
+    return JSON.parse(json) as BridgeData;
   } catch {
-    // Skip inaccessible fibers
+    return null;
   }
-  return (
-    findFiberProp(fiber.child, targetKey, depth + 1, maxDepth) ||
-    findFiberProp(fiber.sibling, targetKey, depth + 1, maxDepth)
-  );
 }
 
 /**
- * Get the React fiber key for the current page.
- */
-function getFiberKey(): string | undefined {
-  const el = document.querySelector("article[data-testid='tweet']");
-  if (!el) return undefined;
-  return Object.keys(el).find((k) => k.startsWith("__reactFiber"));
-}
-
-/**
- * Extract user data from a tweet article element's React fiber tree.
+ * Extract user data from a tweet article element.
  */
 export function getTweetUserData(
   article: HTMLElement
 ): TweetUserData | null {
-  const fiberKey = getFiberKey();
-  if (!fiberKey) return null;
-
-  const fiber = (article as any)[fiberKey];
-  if (!fiber) return null;
-
-  const tweet = findFiberProp(fiber, "tweet");
-  const user = tweet?.user;
-  if (!user) return null;
+  const data = readBridgeData(article);
+  if (!data) return null;
 
   return {
-    screenName: user.screen_name ?? "",
-    following: !!user.following,
-    followedBy: !!user.followed_by,
+    screenName: data.screen_name,
+    following: data.following,
+    followedBy: data.followed_by,
+  };
+}
+
+/**
+ * Extract tweet engagement data from a tweet article element.
+ */
+export function getTweetData(article: HTMLElement): TweetData | null {
+  const data = readBridgeData(article);
+  if (!data) return null;
+
+  return {
+    id_str: data.id_str,
+    favorite_count: data.favorite_count,
+    retweet_count: data.retweet_count,
+    reply_count: data.reply_count,
+    views_count: data.views_count,
   };
 }
 

@@ -1,5 +1,5 @@
 import { features } from "@/lib/features";
-import { featureStates } from "@/lib/storage";
+import { featureStates, featureOptionStates } from "@/lib/storage";
 import type { FeatureStates } from "@/lib/types";
 
 const STYLE_ID = "xes-hide-styles";
@@ -62,6 +62,17 @@ export default defineContentScript({
 
     featureStates.watch((newStates: FeatureStates) => {
       applyFeatures({ ...defaults, ...newStates });
+    });
+
+    // Re-init active script features when their options change
+    featureOptionStates.watch(async () => {
+      for (const feature of features) {
+        if (activeScripts.has(feature.id) && feature.contentScript) {
+          activeScripts.get(feature.id)!(); // cleanup
+          await feature.contentScript.init(); // re-init with new options
+          activeScripts.set(feature.id, feature.contentScript.cleanup);
+        }
+      }
     });
   },
 });

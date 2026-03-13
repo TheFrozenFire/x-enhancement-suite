@@ -1,10 +1,23 @@
-export interface FeatureOption {
+export interface FeatureOptionBase {
   id: string;
   label: string;
   description?: string;
+}
+
+export interface BooleanFeatureOption extends FeatureOptionBase {
   type: "boolean";
   defaultValue: boolean;
 }
+
+export interface NumericFeatureOption extends FeatureOptionBase {
+  type: "number";
+  defaultValue: number;
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export type FeatureOption = BooleanFeatureOption | NumericFeatureOption;
 
 export interface Feature {
   id: string;
@@ -24,4 +37,4 @@ export interface Feature {
 }
 
 export type FeatureStates = Record<string, boolean>;
-export type FeatureOptionStates = Record<string, Record<string, boolean>>;
+export type FeatureOptionStates = Record<string, Record<string, boolean | number>>;

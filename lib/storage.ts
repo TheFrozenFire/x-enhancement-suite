@@ -24,11 +24,24 @@ export const featureOptionStates = storage.defineItem<FeatureOptionStates>(
   { defaultValue: {} }
 );
 
-export async function getFeatureOption(
+export async function getFeatureOption<T extends boolean | number = boolean>(
   featureId: string,
   optionId: string,
-  defaultValue = false
-): Promise<boolean> {
+  defaultValue: T
+): Promise<T> {
   const states = await featureOptionStates.getValue();
-  return states[featureId]?.[optionId] ?? defaultValue;
+  return (states[featureId]?.[optionId] as T) ?? defaultValue;
+}
+
+export async function setFeatureOption(
+  featureId: string,
+  optionId: string,
+  value: boolean | number
+): Promise<void> {
+  const states = await featureOptionStates.getValue();
+  const featureOpts = states[featureId] ?? {};
+  await featureOptionStates.setValue({
+    ...states,
+    [featureId]: { ...featureOpts, [optionId]: value },
+  });
 }

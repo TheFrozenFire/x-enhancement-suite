@@ -1,4 +1,4 @@
 import type { Feature } from "../types";
-import { hideMediaInReplies } from "./hide-media-in-replies";
+import { replyFiltering } from "./reply-filtering";
 
-export const features: Feature[] = [hideMediaInReplies];
+export const features: Feature[] = [replyFiltering];
