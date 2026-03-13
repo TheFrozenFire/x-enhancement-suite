@@ -108,6 +108,31 @@ All GraphQL endpoints require:
 - **Used on:** `/:screen_name/verified_followers`
 - **Returns:** Paginated list of verified/premium followers only. Same user object schema as `Following`.
 
+### `FollowersYouKnow`
+- **Method:** GET
+- **Path:** `/i/api/graphql/{hash}/FollowersYouKnow`
+- **Variables:** `userId` (numeric), `count` (page size), `cursor` (pagination), `includePromotedContent`
+- **Used on:** `/:screen_name/followers_you_follow` (other users only)
+- **Returns:** Paginated list of the profile owner's followers that the logged-in user also follows. Same user object schema as `Following`.
+
+### `HomeLatestTimeline`
+- **Method:** POST
+- **Path:** `/i/api/graphql/{hash}/HomeLatestTimeline`
+- **Used on:** X Pro deck Home column (`pro.x.com`)
+- **Returns:** Chronological timeline entries. Superset of `HomeTimeline` — tweet objects include additional fields (`source`, `source_name`, `views`, `permalink`, `retweeted_status`), user objects include additional fields (`professional`, `subscribed_by`, `dm_blocked_by`, `dm_blocking`). See [X_PRO.md](./X_PRO.md).
+
+### `ViewerAccountSync`
+- **Method:** GET
+- **Path:** `/i/api/graphql/{hash}/ViewerAccountSync`
+- **Used on:** X Pro (`pro.x.com`)
+- **Returns:** Account sync metadata.
+
+### `DelegateSwitcherQuery`
+- **Method:** GET
+- **Path:** `/i/api/graphql/{hash}/DelegateSwitcherQuery`
+- **Used on:** X Pro (`pro.x.com`)
+- **Returns:** Account delegation/switching data.
+
 ## REST Endpoints
 
 ### `user_flow.json`
