@@ -17,6 +17,8 @@ let skipFollowedAndSelf = true;
 let hideLowEngagement = true;
 let engagementFactor = 0.05;
 let minViewsThreshold = 10000;
+let hideShortReplies = true;
+let minWordCount = 10;
 
 // Cached focal tweet view count (per page)
 let focalViews: number | null = null;
@@ -259,18 +261,34 @@ function processArticle(article: HTMLElement) {
 
   if (hideMedia) wrapMedia(article);
 
-  if (hideLowEngagement && !article.hasAttribute(ENGAGEMENT_MARKER)) {
+  if (article.hasAttribute(ENGAGEMENT_MARKER)) return;
+
+  const reasons: string[] = [];
+
+  if (hideLowEngagement) {
     cacheFocalViews();
     const minLikes = getMinLikes();
     if (minLikes > 0) {
       const tweetData = getTweetData(article);
-      if (tweetData) {
-        if (tweetData.favorite_count < minLikes) {
-          console.log(LOG, "Filtering:", userData.screenName, "likes:", tweetData.favorite_count, "< threshold:", Math.ceil(minLikes));
-          collapseReply(article, "LE");
-        }
+      if (tweetData && tweetData.favorite_count < minLikes) {
+        console.log(LOG, "LE:", userData.screenName, "likes:", tweetData.favorite_count, "< threshold:", Math.ceil(minLikes));
+        reasons.push("LE");
       }
     }
+  }
+
+  if (hideShortReplies) {
+    const tweetText = article.querySelector<HTMLElement>('[data-testid="tweetText"]');
+    const text = tweetText?.textContent?.trim() ?? "";
+    const wordCount = text ? text.split(/\s+/).length : 0;
+    if (wordCount < minWordCount) {
+      console.log(LOG, "LWC:", userData.screenName, `${wordCount} words < ${minWordCount}`);
+      reasons.push("LWC");
+    }
+  }
+
+  if (reasons.length > 0) {
+    collapseReply(article, reasons.join(", "));
   }
 }
 
@@ -446,6 +464,25 @@ export const replyFiltering: Feature = {
       max: 1000000,
       step: 1000,
     },
+    {
+      id: "hide-short-replies",
+      label: "Hide short replies",
+      description:
+        "Collapse replies with fewer words than the minimum word count",
+      type: "boolean",
+      defaultValue: true,
+    },
+    {
+      id: "min-word-count",
+      label: "Minimum word count",
+      description:
+        "Replies with fewer words than this will be collapsed",
+      type: "number",
+      defaultValue: 10,
+      min: 1,
+      max: 100,
+      step: 1,
+    },
   ],
   contentScript: {
     async init() {
@@ -472,7 +509,10 @@ export const replyFiltering: Feature = {
         10000
       );
 
-      console.log(LOG, "Init:", { hideMedia, hideLowEngagement, skipFollowedAndSelf, engagementFactor, minViewsThreshold });
+      hideShortReplies = await getFeatureOption(fid, "hide-short-replies", true);
+      minWordCount = await getFeatureOption(fid, "min-word-count", 10);
+
+      console.log(LOG, "Init:", { hideMedia, hideLowEngagement, hideShortReplies, skipFollowedAndSelf, engagementFactor, minViewsThreshold, minWordCount });
 
       injectStyles();
       processNodes(document);
