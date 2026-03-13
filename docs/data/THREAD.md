@@ -152,6 +152,28 @@ Same schema as `tweet.user` but for the authenticated user. Also includes `birth
 - `[data-testid="cellInnerDiv"]` — virtual scroll row container
 - `a[data-testid="AppTabBar_Profile_Link"]` — logged-in user profile link (href = `/{screenName}`)
 
+## Hover Card (`[data-testid="HoverCard"]`)
+
+Hovering over a user's screen name or avatar triggers a hover card popup. This is rendered in the `#layers` container inside `[data-testid="hoverCardParent"]`.
+
+### Network
+No additional network requests are made. The hover card reuses the `tweet.user` data already loaded from the `TweetDetail` response.
+
+### DOM Structure
+- `[data-testid="hoverCardParent"]` — overlay container in `#layers`
+- `[data-testid="HoverCard"]` — the card itself
+  - `[data-testid="UserAvatar-Container-{screenName}"]` — avatar (links to profile)
+  - `[data-testid="{userId}-follow"]` / `[data-testid="{userId}-unfollow"]` — follow/unfollow button
+  - Display name link → `/{screenName}`
+  - Handle link → `/{screenName}`
+  - Bio text (description)
+  - Following count link → `/{screenName}/following`
+  - Followers count link → `/{screenName}/verified_followers`
+  - **"Profile Summary" button** — triggers a Grok AI-generated profile summary
+
+### Fiber Data
+The `user` object is accessible via the avatar element's fiber tree (at depth ~21). It contains the same data as `tweet.user` — **no additional user fields are loaded**. This means all user data shown in the hover card (name, bio, follow counts, follow state) is already available from the tweet itself without triggering a hover.
+
 ## Distinguishing Focal Tweet from Replies
 
 The focal (OP) tweet can be identified by:
