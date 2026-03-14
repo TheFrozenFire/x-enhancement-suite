@@ -494,6 +494,13 @@ function processArticle(article: HTMLElement) {
     return;
   }
 
+  // Skip the focal author's own replies
+  if (focalAuthor && tweetData.screen_name === focalAuthor) {
+    console.log(LOG, "Skipping (focal author):", tweetData.screen_name);
+    article.setAttribute(SKIPPED_MARKER, "true");
+    return;
+  }
+
   // Skip replies that the OP replied to
   if (opRepliedToIds.has(tweetData.id_str)) {
     console.log(LOG, "Skipping (OP replied):", tweetData.screen_name);

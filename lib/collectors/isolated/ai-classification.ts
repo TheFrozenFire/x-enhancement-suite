@@ -75,7 +75,7 @@ function getFocalTweetText(): { text: string; author: string } | null {
   return null;
 }
 
-function getUnclassifiedReplies(): Array<{ id: string; text: string }> {
+function getUnclassifiedReplies(focalAuthor: string | null): Array<{ id: string; text: string }> {
   if (!cache) return [];
 
   const replies: Array<{ id: string; text: string }> = [];
@@ -83,6 +83,9 @@ function getUnclassifiedReplies(): Array<{ id: string; text: string }> {
 
   for (const [tweetId, tweet] of allTweets) {
     if (classifiedIds.has(tweetId)) continue;
+
+    // Skip the focal author's own replies
+    if (focalAuthor && tweet.screen_name === focalAuthor) continue;
 
     // Skip if this looks like the focal tweet (has analytics link in DOM)
     const article = document.querySelector<HTMLElement>(
@@ -125,7 +128,7 @@ async function runClassificationBatch() {
     return;
   }
 
-  const replies = getUnclassifiedReplies();
+  const replies = getUnclassifiedReplies(focal.author || null);
   if (replies.length === 0) {
     console.log(LOG, "No unclassified replies found");
     return;
