@@ -34,8 +34,10 @@ let filtersVisible = false;
 let filteredCount = 0;
 let toggleBtn: HTMLElement | null = null;
 
-// Cached focal tweet view count (per page)
+// Cached focal tweet data (per page)
 let focalViews: number | null = null;
+let focalAuthor: string | null = null;
+let opRepliedToIds = new Set<string>();
 let lastPath = "";
 
 interface TweetCacheData {
@@ -47,6 +49,7 @@ interface TweetCacheData {
   screen_name: string;
   following: boolean;
   followed_by: boolean;
+  in_reply_to_status_id_str: string | null;
 }
 
 function getTweetDataFromCache(
@@ -126,6 +129,8 @@ function cacheFocalViews() {
     console.log(LOG, "Path changed:", lastPath, "→", currentPath);
     lastPath = currentPath;
     focalViews = null;
+    focalAuthor = null;
+    opRepliedToIds.clear();
     filteredCount = 0;
     toggleBtn?.remove();
     toggleBtn = null;
@@ -142,13 +147,17 @@ function cacheFocalViews() {
       const tweetData = getTweetDataFromCache(article);
       if (tweetData?.views_count != null) {
         focalViews = tweetData.views_count;
+        focalAuthor = tweetData.screen_name || null;
         console.log(
           LOG,
           "Cached focal views:",
           focalViews,
+          "author:",
+          focalAuthor,
           "minLikes:",
           getMinLikes()
         );
+        rebuildOpRepliedToIds();
         return;
       }
       // Fallback: parse abbreviated count from DOM text
@@ -173,6 +182,30 @@ function cacheFocalViews() {
 function getMinLikes(): number {
   if (focalViews === null || focalViews < minViewsThreshold) return 0;
   return Math.sqrt(focalViews) * engagementFactor;
+}
+
+/**
+ * Scan all cached tweet data to find tweets by the focal author (OP)
+ * that are replies to other tweets. Those replied-to tweet IDs are
+ * collected so we can skip filtering on them.
+ */
+function rebuildOpRepliedToIds() {
+  if (!cache || !focalAuthor) return;
+
+  opRepliedToIds.clear();
+  const allTweets = cache.getAll<TweetCacheData>("tweet-data");
+  for (const [, tweet] of allTweets) {
+    if (
+      tweet.screen_name === focalAuthor &&
+      tweet.in_reply_to_status_id_str
+    ) {
+      opRepliedToIds.add(tweet.in_reply_to_status_id_str);
+    }
+  }
+
+  if (opRepliedToIds.size > 0) {
+    console.log(LOG, "OP replied to tweet IDs:", [...opRepliedToIds]);
+  }
 }
 
 function wrapMedia(article: HTMLElement) {
@@ -310,6 +343,19 @@ function collapseReply(article: HTMLElement, reason: string) {
   updateToggleButton();
 }
 
+function uncollapseReply(article: HTMLElement) {
+  console.log(LOG, "Uncollapsing previously filtered reply");
+  article.removeAttribute(ENGAGEMENT_MARKER);
+  article
+    .querySelectorAll<HTMLElement>(".xes-show-reply-btn")
+    .forEach((btn) => btn.remove());
+  article
+    .querySelectorAll<HTMLElement>(".xes-collapse-hidden")
+    .forEach((el) => el.classList.remove("xes-collapse-hidden"));
+  filteredCount = Math.max(0, filteredCount - 1);
+  updateToggleButton();
+}
+
 function updateToggleButton() {
   if (toggleBtn) {
     toggleBtn.textContent = filtersVisible
@@ -435,6 +481,17 @@ function processArticle(article: HTMLElement) {
   if (shouldSkip(tweetData)) {
     console.log(LOG, "Skipping (followed/self):", tweetData.screen_name);
     article.setAttribute(SKIPPED_MARKER, "true");
+    return;
+  }
+
+  // Skip replies that the OP replied to
+  if (opRepliedToIds.has(tweetData.id_str)) {
+    console.log(LOG, "Skipping (OP replied):", tweetData.screen_name);
+    article.setAttribute(SKIPPED_MARKER, "true");
+    // Reverse any existing collapse
+    if (article.hasAttribute(ENGAGEMENT_MARKER)) {
+      uncollapseReply(article);
+    }
     return;
   }
 
@@ -651,6 +708,8 @@ function cleanupAll() {
   filtersVisible = false;
 
   focalViews = null;
+  focalAuthor = null;
+  opRepliedToIds.clear();
   lastPath = "";
   cache = null;
 }
@@ -805,6 +864,8 @@ const replyFiltering: BehaviorPlugin = {
 
     // React to new tweet data arriving from the cache bridge
     cache.on("tweet-data", (_collectorId, _key, _value) => {
+      // Rebuild OP-replied-to set in case this is an OP reply
+      rebuildOpRepliedToIds();
       // Re-process articles that now have data available
       processNodes(document);
     });

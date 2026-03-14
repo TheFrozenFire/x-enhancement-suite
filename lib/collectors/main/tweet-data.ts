@@ -63,6 +63,7 @@ function extractTweetData(article: HTMLElement): boolean {
     screen_name: tweet.user?.screen_name ?? "",
     following: !!tweet.user?.following,
     followed_by: !!tweet.user?.followed_by,
+    in_reply_to_status_id_str: tweet.in_reply_to_status_id_str ?? null,
   };
 
   const tweetId = data.id_str || `dom-${Date.now()}`;
