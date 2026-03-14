@@ -1,12 +1,15 @@
 import type { Feature } from "../types";
 import { getFeatureOption } from "../storage";
 import { getTweetUserData, getTweetData, getLoggedInUsername } from "../tweet-utils";
+import { lookupCountry, getCachedCountrySync } from "../country-lookup";
 
 const LOG = "[XES:reply-filter]";
 const STYLE_ID = "xes-reply-filtering";
 const MEDIA_MARKER = "data-xes-media-hidden";
 const ENGAGEMENT_MARKER = "data-xes-low-engagement";
 const SKIPPED_MARKER = "data-xes-reply-skipped";
+const HOVER_MARKER = "data-xes-hover-bound";
+const COUNTRY_MARKER = "data-xes-country";
 
 let observer: MutationObserver | null = null;
 let scanInterval: ReturnType<typeof setInterval> | null = null;
@@ -19,6 +22,8 @@ let engagementFactor = 0.05;
 let minViewsThreshold = 10000;
 let hideShortReplies = true;
 let minWordCount = 10;
+let filterByCountry = false;
+let allowedCountries = "";
 
 // Runtime state
 let filtersVisible = false;
@@ -301,6 +306,62 @@ function insertToggleButton() {
   console.log(LOG, "Inserted toggle button inside focal cell");
 }
 
+function bindHoverLookup(article: HTMLElement, screenName: string) {
+  if (article.hasAttribute(HOVER_MARKER)) return;
+  article.setAttribute(HOVER_MARKER, "true");
+
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  article.addEventListener("mouseenter", () => {
+    // Already have country data for this user
+    if (getCachedCountrySync(screenName)) return;
+
+    hoverTimer = setTimeout(() => {
+      lookupCountry(screenName).then((country) => {
+        if (country) {
+          article.setAttribute(COUNTRY_MARKER, country);
+          // Re-evaluate this article now that we have country data
+          applyCountryFilter(article, screenName, country);
+        }
+      });
+    }, 300);
+  });
+
+  article.addEventListener("mouseleave", () => {
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+    }
+  });
+}
+
+function applyCountryFilter(article: HTMLElement, screenName: string, country: string) {
+  if (!filterByCountry) return;
+  if (article.getAttribute(ENGAGEMENT_MARKER) === "revealed") return;
+
+  const allowed = allowedCountries
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.length === 0) return;
+
+  if (!allowed.includes(country.toLowerCase())) {
+    console.log(LOG, "FC:", screenName, "country:", country, "not in allowed list");
+    // If already collapsed, update the reason button text
+    if (article.hasAttribute(ENGAGEMENT_MARKER)) {
+      const btn = article.querySelector<HTMLElement>(".xes-show-reply-btn .xes-collapse-reason");
+      if (btn) {
+        const current = btn.textContent?.replace(/[()]/g, "") ?? "";
+        if (!current.includes("FC")) {
+          btn.textContent = `(${current}, FC)`;
+        }
+      }
+    } else {
+      collapseReply(article, "FC");
+    }
+  }
+}
+
 function processArticle(article: HTMLElement) {
   if (article.hasAttribute(SKIPPED_MARKER)) return;
   if (!isReply(article)) {
@@ -319,6 +380,17 @@ function processArticle(article: HTMLElement) {
   }
 
   if (hideMedia) wrapMedia(article);
+
+  // Bind hover-triggered country lookup
+  if (filterByCountry) {
+    bindHoverLookup(article, userData.screenName);
+
+    // Check if we already have cached country data
+    const cached = getCachedCountrySync(userData.screenName);
+    if (cached) {
+      article.setAttribute(COUNTRY_MARKER, cached);
+    }
+  }
 
   if (article.hasAttribute(ENGAGEMENT_MARKER)) return;
 
@@ -343,6 +415,21 @@ function processArticle(article: HTMLElement) {
     if (wordCount < minWordCount) {
       console.log(LOG, "LWC:", userData.screenName, `${wordCount} words < ${minWordCount}`);
       reasons.push("LWC");
+    }
+  }
+
+  // Country filter (synchronous check from cache)
+  if (filterByCountry) {
+    const country = getCachedCountrySync(userData.screenName);
+    if (country) {
+      const allowed = allowedCountries
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      if (allowed.length > 0 && !allowed.includes(country.toLowerCase())) {
+        console.log(LOG, "FC:", userData.screenName, "country:", country);
+        reasons.push("FC");
+      }
     }
   }
 
@@ -572,6 +659,22 @@ export const replyFiltering: Feature = {
       max: 100,
       step: 1,
     },
+    {
+      id: "filter-by-country",
+      label: "Filter by account country",
+      description:
+        "Collapse replies from accounts not based in allowed countries (looked up on hover)",
+      type: "boolean",
+      defaultValue: false,
+    },
+    {
+      id: "allowed-countries",
+      label: "Allowed countries",
+      description:
+        "Comma-separated list of allowed countries (e.g. 'United States, Canada, United Kingdom')",
+      type: "string",
+      defaultValue: "",
+    },
   ],
   contentScript: {
     async init() {
@@ -600,8 +703,10 @@ export const replyFiltering: Feature = {
 
       hideShortReplies = await getFeatureOption(fid, "hide-short-replies", true);
       minWordCount = await getFeatureOption(fid, "min-word-count", 10);
+      filterByCountry = await getFeatureOption(fid, "filter-by-country", false);
+      allowedCountries = await getFeatureOption<string>(fid, "allowed-countries", "");
 
-      console.log(LOG, "Init:", { hideMedia, hideLowEngagement, hideShortReplies, skipFollowedAndSelf, engagementFactor, minViewsThreshold, minWordCount });
+      console.log(LOG, "Init:", { hideMedia, hideLowEngagement, hideShortReplies, skipFollowedAndSelf, engagementFactor, minViewsThreshold, minWordCount, filterByCountry, allowedCountries });
 
       injectStyles();
       processNodes(document);

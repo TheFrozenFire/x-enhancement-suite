@@ -9,6 +9,7 @@ export default defineConfig({
   manifest: {
     name: "X Enhancement Suite",
     description: "Toggleable enhancements for a better X/Twitter experience",
-    permissions: ["storage"],
+    permissions: ["storage", "declarativeNetRequest"],
+    host_permissions: ["*://*.x.com/*", "*://*.twitter.com/*"],
   },
 });

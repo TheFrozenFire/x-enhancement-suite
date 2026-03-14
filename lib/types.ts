@@ -17,7 +17,12 @@ export interface NumericFeatureOption extends FeatureOptionBase {
   step?: number;
 }
 
-export type FeatureOption = BooleanFeatureOption | NumericFeatureOption;
+export interface StringFeatureOption extends FeatureOptionBase {
+  type: "string";
+  defaultValue: string;
+}
+
+export type FeatureOption = BooleanFeatureOption | NumericFeatureOption | StringFeatureOption;
 
 export interface Feature {
   id: string;
@@ -37,4 +42,11 @@ export interface Feature {
 }
 
 export type FeatureStates = Record<string, boolean>;
-export type FeatureOptionStates = Record<string, Record<string, boolean | number>>;
+export type FeatureOptionStates = Record<string, Record<string, boolean | number | string>>;
+
+export interface CountryCacheEntry {
+  country: string;
+  fetchedAt: number;
+}
+
+export type CountryCache = Record<string, CountryCacheEntry>;

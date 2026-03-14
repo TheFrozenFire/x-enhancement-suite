@@ -80,6 +80,9 @@ export default defineContentScript({
   world: "MAIN",
   runAt: "document_idle",
   async main() {
+    // Don't run fiber bridge inside our data-scraping iframes
+    if (window !== window.top && window.name === "xes-iframe") return;
+
     console.log(LOG, "Init");
 
     processArticles(document);

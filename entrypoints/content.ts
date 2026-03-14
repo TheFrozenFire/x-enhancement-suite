@@ -53,6 +53,9 @@ async function applyFeatures(states: FeatureStates) {
 export default defineContentScript({
   matches: ["*://*.x.com/*", "*://*.twitter.com/*"],
   async main() {
+    // Don't apply features inside our data-scraping iframes
+    if (window !== window.top && window.name === "xes-iframe") return;
+
     const defaults: FeatureStates = Object.fromEntries(
       features.map((f) => [f.id, f.defaultEnabled])
     );

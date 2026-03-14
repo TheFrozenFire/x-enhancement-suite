@@ -1,5 +1,5 @@
 import { storage } from "wxt/utils/storage";
-import type { FeatureStates, FeatureOptionStates } from "./types";
+import type { FeatureStates, FeatureOptionStates, CountryCache } from "./types";
 
 export const featureStates = storage.defineItem<FeatureStates>(
   "local:featureStates",
@@ -24,7 +24,7 @@ export const featureOptionStates = storage.defineItem<FeatureOptionStates>(
   { defaultValue: {} }
 );
 
-export async function getFeatureOption<T extends boolean | number = boolean>(
+export async function getFeatureOption<T extends boolean | number | string = boolean>(
   featureId: string,
   optionId: string,
   defaultValue: T
@@ -36,7 +36,7 @@ export async function getFeatureOption<T extends boolean | number = boolean>(
 export async function setFeatureOption(
   featureId: string,
   optionId: string,
-  value: boolean | number
+  value: boolean | number | string
 ): Promise<void> {
   const states = await featureOptionStates.getValue();
   const featureOpts = states[featureId] ?? {};
@@ -45,3 +45,9 @@ export async function setFeatureOption(
     [featureId]: { ...featureOpts, [optionId]: value },
   });
 }
+
+// Country cache — keyed by lowercase screen name
+export const countryCache = storage.defineItem<CountryCache>(
+  "local:countryCache",
+  { defaultValue: {} }
+);
