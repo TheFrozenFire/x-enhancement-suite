@@ -1,9 +1,19 @@
 import type { BehaviorPlugin, CacheService } from "../plugin-types";
+import type { AiClassifier } from "../ai/types";
 import { getFeatureOption } from "../storage";
 import {
   lookupCountry,
   getCachedCountrySync,
 } from "../collectors/isolated/country-data";
+
+// Auto-discover AI classifiers for acronym metadata
+const classifierModules = import.meta.glob<{ default: AiClassifier }>(
+  "../ai/classifiers/*.ts",
+  { eager: true }
+);
+const aiClassifiers: AiClassifier[] = Object.values(classifierModules).map(
+  (m) => m.default
+);
 
 const LOG = "[XES:reply-filter]";
 const STYLE_ID = "xes-reply-filtering";
@@ -563,6 +573,19 @@ function processArticle(article: HTMLElement) {
     }
   }
 
+  // Check AI classification results
+  const aiResult = cache.get<Record<string, boolean>>(
+    "ai-classification",
+    tweetData.id_str
+  );
+  if (aiResult) {
+    for (const classifier of aiClassifiers) {
+      if (aiResult[classifier.id]) {
+        reasons.push(classifier.acronym);
+      }
+    }
+  }
+
   if (reasons.length > 0) {
     collapseReply(article, reasons.join(", "));
   }
@@ -721,7 +744,7 @@ const replyFiltering: BehaviorPlugin = {
     "Filter and collapse low-quality replies on tweet threads",
   category: "Replies",
   defaultEnabled: true,
-  depends: ["tweet-data", "country-data"],
+  depends: ["tweet-data", "country-data", "ai-classification"],
   options: [
     {
       id: "hide-media",
@@ -868,6 +891,46 @@ const replyFiltering: BehaviorPlugin = {
       rebuildOpRepliedToIds();
       // Re-process articles that now have data available
       processNodes(document);
+    });
+
+    // React to AI classification results arriving
+    cache.on("ai-classification", (_collectorId, tweetId, value) => {
+      const aiResult = value as Record<string, boolean>;
+      // Check if any classification is positive
+      const positiveClassifiers = aiClassifiers.filter(
+        (c) => aiResult[c.id]
+      );
+      if (positiveClassifiers.length === 0) return;
+
+      const acronyms = positiveClassifiers.map((c) => c.acronym);
+
+      // Find the article with this tweet ID
+      const article = document.querySelector<HTMLElement>(
+        `[data-xes-tweet-id="${tweetId}"]`
+      );
+      if (!article) return;
+      if (article.getAttribute(ENGAGEMENT_MARKER) === "revealed") return;
+      if (article.hasAttribute(SKIPPED_MARKER)) return;
+
+      if (article.hasAttribute(ENGAGEMENT_MARKER)) {
+        // Already collapsed — append AI acronyms to existing reason
+        const reasonEl = article.querySelector<HTMLElement>(
+          ".xes-show-reply-btn .xes-collapse-reason"
+        );
+        if (reasonEl) {
+          const current = reasonEl.textContent?.replace(/[()]/g, "") ?? "";
+          const existing = current.split(",").map((s) => s.trim()).filter(Boolean);
+          const newReasons = acronyms.filter((a) => !existing.includes(a));
+          if (newReasons.length > 0) {
+            reasonEl.textContent = `(${[...existing, ...newReasons].join(", ")})`;
+            console.log(LOG, "Appended AI reasons to", tweetId, ":", newReasons);
+          }
+        }
+      } else {
+        // Not yet collapsed — collapse with AI reason
+        console.log(LOG, "AI collapse:", tweetId, acronyms);
+        collapseReply(article, acronyms.join(", "));
+      }
     });
 
     // React to country data arriving

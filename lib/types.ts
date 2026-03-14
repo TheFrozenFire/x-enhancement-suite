@@ -38,3 +38,5 @@ export interface CountryCacheEntry {
 }
 
 export type CountryCache = Record<string, CountryCacheEntry>;
+
+export type { AiProviderConfig } from "./ai/types";

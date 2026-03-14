@@ -1,5 +1,5 @@
 import { storage } from "wxt/utils/storage";
-import type { FeatureStates, PluginStates, FeatureOptionStates, CountryCache } from "./types";
+import type { FeatureStates, PluginStates, FeatureOptionStates, CountryCache, AiProviderConfig } from "./types";
 
 // Legacy storage item — used only for migration
 const featureStates = storage.defineItem<FeatureStates>(
@@ -52,6 +52,12 @@ export async function setFeatureOption(
     [featureId]: { ...featureOpts, [optionId]: value },
   });
 }
+
+// AI provider configuration
+export const aiProviderConfig = storage.defineItem<AiProviderConfig>(
+  "local:aiProviderConfig",
+  { defaultValue: {} }
+);
 
 // Country cache — keyed by lowercase screen name
 export const countryCache = storage.defineItem<CountryCache>(

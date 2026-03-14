@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import type { Plugin, DataCollector, BehaviorPlugin } from "@/lib/plugin-types";
 import { isDataCollector, isBehaviorPlugin } from "@/lib/plugin-types";
 import { extractPlugins, getPluginsByCategory } from "@/lib/registry";
-import { pluginStates, featureOptionStates, setPluginEnabled, setFeatureOption } from "@/lib/storage";
+import { pluginStates, featureOptionStates, aiProviderConfig, setPluginEnabled, setFeatureOption } from "@/lib/storage";
 import type { PluginStates, FeatureOptionStates } from "@/lib/types";
+import type { AiProviderConfig, AiProvider } from "@/lib/ai/types";
 
 // Discover all plugins for metadata
 const collectorMainModules = import.meta.glob<{ default: DataCollector }>(
@@ -29,6 +30,7 @@ const allPlugins: Plugin[] = [...allCollectors, ...allBehaviorPlugins];
 function App() {
   const [states, setStates] = useState<PluginStates>({});
   const [optionStates, setOptionStates] = useState<FeatureOptionStates>({});
+  const [providerConfig, setProviderConfig] = useState<AiProviderConfig>({});
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -42,12 +44,15 @@ function App() {
   useEffect(() => {
     pluginStates.getValue().then((s) => setStates(s));
     featureOptionStates.getValue().then((s) => setOptionStates(s));
+    aiProviderConfig.getValue().then((s) => setProviderConfig(s));
 
     const unwatchPlugin = pluginStates.watch((s) => setStates(s));
     const unwatchOption = featureOptionStates.watch((s) => setOptionStates(s));
+    const unwatchProvider = aiProviderConfig.watch((s) => setProviderConfig(s));
     return () => {
       unwatchPlugin();
       unwatchOption();
+      unwatchProvider();
     };
   }, []);
 
@@ -89,6 +94,24 @@ function App() {
     return allBehaviorPlugins.filter((p) =>
       p.depends?.includes(collectorId)
     );
+  }
+
+  async function handleProviderChange(
+    slot: "fast" | "smart",
+    field: keyof AiProvider,
+    value: string | Record<string, unknown>
+  ) {
+    const current = await aiProviderConfig.getValue();
+    const slotConfig = current[slot] ?? { endpoint: "", apiKey: "", model: "" };
+    const updated = { ...slotConfig, [field]: value };
+    // Clean out empty extraParams
+    if (field === "extraParams" && (value === "" || value === null)) {
+      delete (updated as any).extraParams;
+    }
+    await aiProviderConfig.setValue({
+      ...current,
+      [slot]: updated,
+    });
   }
 
   async function handleToggle(pluginId: string, enabled: boolean) {
@@ -148,6 +171,24 @@ function App() {
           All
         </button>
 
+        <button
+          onClick={() => setSelectedCategory("__ai_providers__")}
+          style={{
+            display: "block",
+            width: "100%",
+            padding: "8px 16px",
+            border: "none",
+            background: selectedCategory === "__ai_providers__" ? "#1d9bf020" : "transparent",
+            color: selectedCategory === "__ai_providers__" ? "#1d9bf0" : "#8b98a5",
+            fontWeight: selectedCategory === "__ai_providers__" ? 700 : 400,
+            fontSize: 14,
+            textAlign: "left",
+            cursor: "pointer",
+          }}
+        >
+          AI Providers
+        </button>
+
         {categories.map(({ name, plugins }) => (
           <button
             key={name}
@@ -172,7 +213,148 @@ function App() {
 
       {/* Main content */}
       <main style={{ flex: 1, padding: 24, maxWidth: 720 }}>
-        {visiblePlugins.map((plugin) => {
+        {selectedCategory === "__ai_providers__" && (
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 16px" }}>
+              AI Providers
+            </h2>
+            <p style={{ fontSize: 13, color: "#8b98a5", margin: "0 0 16px" }}>
+              Configure OpenAI-compatible LLM endpoints. The "fast" slot is used for high-volume tasks like reply classification. The "smart" slot is reserved for future deeper analysis features.
+            </p>
+
+            {(["fast", "smart"] as const).map((slot) => {
+              const config = providerConfig[slot] ?? { endpoint: "", apiKey: "", model: "" };
+              const isEmpty = !config.endpoint && !config.apiKey && !config.model;
+              return (
+                <div
+                  key={slot}
+                  style={{
+                    border: "1px solid #38444d",
+                    borderRadius: 12,
+                    padding: 16,
+                    marginBottom: 12,
+                    background: "#192734",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, textTransform: "capitalize" }}>
+                      {slot} Provider
+                    </span>
+                    {isEmpty && (
+                      <span style={{ marginLeft: 8, fontSize: 12, color: "#8b98a5" }}>
+                        Not configured
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, color: "#8b98a5", display: "block", marginBottom: 4 }}>
+                      Endpoint URL
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://api.example.com/v1"
+                      value={config.endpoint}
+                      onChange={(e) => handleProviderChange(slot, "endpoint", e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        border: "1px solid #38444d",
+                        borderRadius: 8,
+                        background: "#15202b",
+                        color: "#e7e9ea",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, color: "#8b98a5", display: "block", marginBottom: 4 }}>
+                      API Key
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="sk-..."
+                      value={config.apiKey}
+                      onChange={(e) => handleProviderChange(slot, "apiKey", e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        border: "1px solid #38444d",
+                        borderRadius: 8,
+                        background: "#15202b",
+                        color: "#e7e9ea",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, color: "#8b98a5", display: "block", marginBottom: 4 }}>
+                      Model
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. gpt-4o-mini"
+                      value={config.model}
+                      onChange={(e) => handleProviderChange(slot, "model", e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        border: "1px solid #38444d",
+                        borderRadius: 8,
+                        background: "#15202b",
+                        color: "#e7e9ea",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 12, color: "#8b98a5", display: "block", marginBottom: 4 }}>
+                      Extra Parameters (JSON)
+                    </label>
+                    <textarea
+                      placeholder='e.g. {"reasoning_effort": "low"}'
+                      value={config.extraParams ? JSON.stringify(config.extraParams, null, 2) : ""}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        if (!val) {
+                          handleProviderChange(slot, "extraParams", "" as any);
+                          return;
+                        }
+                        try {
+                          const parsed = JSON.parse(val);
+                          handleProviderChange(slot, "extraParams", parsed);
+                        } catch {
+                          // Don't update storage on invalid JSON — let user keep typing
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        border: "1px solid #38444d",
+                        borderRadius: 8,
+                        background: "#15202b",
+                        color: "#e7e9ea",
+                        fontSize: 13,
+                        fontFamily: "monospace",
+                        boxSizing: "border-box",
+                        minHeight: 60,
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {selectedCategory !== "__ai_providers__" && visiblePlugins.map((plugin) => {
           const enabled = merged[plugin.id] ?? plugin.defaultEnabled;
           const isCollector = isDataCollector(plugin);
           const dependents = isCollector ? getDependentPlugins(plugin.id) : [];
@@ -402,6 +584,7 @@ function App() {
           );
         })}
       </main>
+
     </div>
   );
 }
