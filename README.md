@@ -6,11 +6,7 @@ Built with [WXT](https://wxt.dev/) + React, targeting Manifest V3.
 
 ## Features
 
-- **Reply filtering** — collapse low-engagement, short, or foreign-country replies with configurable thresholds
-- **AI classification** — route replies through any OpenAI-compatible LLM to detect vitriol, low-value content, etc.
-- **Plugin architecture** — data collectors and behavior plugins, auto-discovered at build time, toggleable per-user
-- **Options page** — full settings console with per-plugin configuration
-- **Popup** — quick-toggle for all plugins
+Toggleable plugins for reply filtering, AI-powered content classification, media controls, and more. All plugins are auto-discovered at build time and configurable via the options page or popup.
 
 ## Setup
 
