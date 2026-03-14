@@ -1,33 +1,38 @@
 # X Enhancement Suite
 
 ## Project Overview
-Chrome extension (WXT + React) that enhances the X/Twitter experience with toggleable features.
+Chrome extension (WXT + React) that enhances the X/Twitter experience with toggleable plugins.
 
 ## Architecture
 - **WXT framework** with React, targeting Manifest V3
 - **pnpm** as package manager
+- Plugin system with auto-discovery via `import.meta.glob()`
+- Two plugin types: **DataCollectors** (extract data) and **BehaviorPlugins** (manipulate DOM)
+- Central **CacheService** acts as event bus connecting collectors to behavior plugins
+- MAIN ↔ ISOLATED world bridge via CustomEvents
 - Features are user-directed — don't add features without being told to
 
-## Feature System
-Features are defined in `lib/features/`. Each feature module exports a `Feature` definition containing:
-- Metadata (id, name, description, category)
-- CSS selectors to hide/show elements
-- Optional content script logic for complex behaviors
-- Default enabled/disabled state
-
-Feature state is persisted via WXT's `storage` API.
-
-The content script reads enabled features and applies them:
-- Selector-based features inject CSS to hide matching elements
-- Script-based features execute their logic directly
+## Plugin System
+Plugins are defined as default exports in their respective directories:
+- **Data Collectors** publish data to the CacheService via `cache.set()`
+- **Behavior Plugins** subscribe to cache events via `cache.on()` and declare `depends` on collectors
+- Plugins are auto-discovered at build time — no manual registration needed
 
 ## Key Paths
-- `lib/features/` — Feature definitions
-- `lib/storage.ts` — Feature state persistence
-- `lib/types.ts` — Shared types
-- `entrypoints/content.ts` — Applies features to X pages
-- `entrypoints/background.ts` — Handles storage and messaging
-- `entrypoints/popup/` — React UI for toggling features
+- `lib/plugin-types.ts` — DataCollector, BehaviorPlugin, CacheService interfaces
+- `lib/cache.ts` — CacheService implementation (event bus + typed storage)
+- `lib/cache-bridge.ts` — MAIN↔ISOLATED CustomEvent bridge
+- `lib/registry.ts` — Dependency ordering, validation, auto-discovery helpers
+- `lib/storage.ts` — Plugin state persistence (WXT storage API)
+- `lib/types.ts` — Shared types (FeatureOption, PluginStates)
+- `lib/collectors/main/` — MAIN world data collectors (e.g. tweet-data)
+- `lib/collectors/isolated/` — ISOLATED world data collectors (e.g. country-data)
+- `lib/plugins/` — Behavior plugins (e.g. reply-filtering, disable-video-loop)
+- `entrypoints/main-world.content.ts` — MAIN world collector runner
+- `entrypoints/content.ts` — ISOLATED world collector + plugin runner
+- `entrypoints/background.ts` — DNR rules + storage migration
+- `entrypoints/options/` — Full settings console (React)
+- `entrypoints/popup/` — Quick-toggle popup (React)
 
 ## Conventions
 - Maintain `docs/DESIGN.md` as living design documentation

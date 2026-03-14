@@ -1,3 +1,5 @@
+import { migrateStorage } from "@/lib/storage";
+
 const DNR_RULE_ID = 1;
 
 async function setupDNRRules() {
@@ -36,5 +38,6 @@ async function setupDNRRules() {
 
 export default defineBackground(() => {
   console.log("[XES:background] Init", { id: browser.runtime.id });
+  migrateStorage();
   setupDNRRules();
 });

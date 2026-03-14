@@ -6,7 +6,7 @@
  * at the start, ready for the user to manually replay if they want.
  */
 
-import type { Feature } from "../types";
+import type { BehaviorPlugin, CacheService } from "../plugin-types";
 
 const LOG = "[XES:disable-video-loop]";
 const MARKER = "data-xes-no-loop";
@@ -42,40 +42,44 @@ function scanVideos(root: Element | Document) {
   }
 }
 
-function init() {
-  console.log(LOG, "Init");
-  scanVideos(document);
-
-  observer = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node instanceof HTMLElement) {
-          if (node.tagName === "VIDEO") {
-            bindVideo(node as HTMLVideoElement);
-          } else {
-            scanVideos(node);
-          }
-        }
-      }
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-}
-
-function cleanup() {
-  console.log(LOG, "Cleanup");
-  observer?.disconnect();
-  observer = null;
-  for (const video of document.querySelectorAll<HTMLVideoElement>(`video[${MARKER}]`)) {
-    unbindVideo(video);
-  }
-}
-
-export const disableVideoLoop: Feature = {
+const disableVideoLoop: BehaviorPlugin = {
   id: "disable-video-loop",
   name: "Disable Video Loop",
   description: "Prevents videos from automatically looping when they reach the end",
   category: "Media",
   defaultEnabled: true,
-  contentScript: { init, cleanup },
+  depends: [],
+
+  init(_cache: CacheService) {
+    console.log(LOG, "Init");
+    scanVideos(document);
+
+    observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node instanceof HTMLElement) {
+            if (node.tagName === "VIDEO") {
+              bindVideo(node as HTMLVideoElement);
+            } else {
+              scanVideos(node);
+            }
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  },
+
+  cleanup() {
+    console.log(LOG, "Cleanup");
+    observer?.disconnect();
+    observer = null;
+    for (const video of document.querySelectorAll<HTMLVideoElement>(
+      `video[${MARKER}]`
+    )) {
+      unbindVideo(video);
+    }
+  },
 };
+
+export default disableVideoLoop;

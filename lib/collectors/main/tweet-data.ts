@@ -1,16 +1,18 @@
 /**
- * MAIN world content script that extracts React fiber data from tweet articles
- * and exposes it as data attributes readable by the ISOLATED world content script.
+ * MAIN world data collector: extracts React fiber data from tweet articles
+ * and publishes it to the cache (which bridges to the ISOLATED world).
  *
- * This bridge is needed because MV3 content scripts run in an isolated world
- * and cannot access page-script properties like __reactFiber$.
+ * This collector runs in the page's JS context where __reactFiber$ is accessible.
  */
 
-const LOG = "[XES:fiber-bridge]";
-const DATA_ATTR = "data-xes-tweet-data";
+import type { DataCollector, CacheService } from "../../plugin-types";
+
+const LOG = "[XES:tweet-data]";
+const DATA_ATTR = "data-xes-tweet-id";
 
 let observer: MutationObserver | null = null;
 let scanInterval: ReturnType<typeof setInterval> | null = null;
+let cache: CacheService | null = null;
 
 function getFiberKey(): string | undefined {
   const el = document.querySelector("article[data-testid='tweet']");
@@ -39,6 +41,7 @@ function findFiberProp(
 
 function extractTweetData(article: HTMLElement): boolean {
   if (article.hasAttribute(DATA_ATTR)) return true;
+  if (!cache) return false;
 
   const fiberKey = getFiberKey();
   if (!fiberKey) return false;
@@ -62,7 +65,9 @@ function extractTweetData(article: HTMLElement): boolean {
     followed_by: !!tweet.user?.followed_by,
   };
 
-  article.setAttribute(DATA_ATTR, JSON.stringify(data));
+  const tweetId = data.id_str || `dom-${Date.now()}`;
+  article.setAttribute(DATA_ATTR, tweetId);
+  cache.set("tweet-data", tweetId, data);
   return true;
 }
 
@@ -75,14 +80,17 @@ function processArticles(root: Element | Document) {
   }
 }
 
-export default defineContentScript({
-  matches: ["*://*.x.com/*", "*://*.twitter.com/*"],
-  world: "MAIN",
-  runAt: "document_idle",
-  async main() {
-    // Don't run fiber bridge inside our data-scraping iframes
-    if (window !== window.top && window.name === "xes-iframe") return;
+const tweetData: DataCollector = {
+  id: "tweet-data",
+  name: "Tweet Data Extraction",
+  description:
+    "Extracts tweet engagement metrics and user data from React fiber internals",
+  category: "Data Sources",
+  defaultEnabled: true,
+  world: "main",
 
+  init(cacheService: CacheService) {
+    cache = cacheService;
     console.log(LOG, "Init");
 
     processArticles(document);
@@ -91,7 +99,6 @@ export default defineContentScript({
       for (const m of mutations) {
         for (const node of m.addedNodes) {
           if (node instanceof HTMLElement) {
-            // Check if the added node is or contains an article
             if (node.matches?.('article[data-testid="tweet"]')) {
               extractTweetData(node);
             } else {
@@ -106,7 +113,25 @@ export default defineContentScript({
       subtree: true,
     });
 
-    // Periodic rescan to catch articles whose fiber data was set after initial DOM insertion
+    // Periodic rescan for articles whose fiber data arrived after DOM insertion
     scanInterval = setInterval(() => processArticles(document), 500);
   },
-});
+
+  cleanup() {
+    console.log(LOG, "Cleanup");
+    observer?.disconnect();
+    observer = null;
+    if (scanInterval) {
+      clearInterval(scanInterval);
+      scanInterval = null;
+    }
+    cache = null;
+
+    // Remove data attributes
+    document
+      .querySelectorAll<HTMLElement>(`[${DATA_ATTR}]`)
+      .forEach((el) => el.removeAttribute(DATA_ATTR));
+  },
+};
+
+export default tweetData;

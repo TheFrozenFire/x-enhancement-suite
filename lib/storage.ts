@@ -1,22 +1,29 @@
 import { storage } from "wxt/utils/storage";
-import type { FeatureStates, FeatureOptionStates, CountryCache } from "./types";
+import type { FeatureStates, PluginStates, FeatureOptionStates, CountryCache } from "./types";
 
-export const featureStates = storage.defineItem<FeatureStates>(
+// Legacy storage item — used only for migration
+const featureStates = storage.defineItem<FeatureStates>(
   "local:featureStates",
   { defaultValue: {} }
 );
 
-export async function isFeatureEnabled(featureId: string): Promise<boolean> {
-  const states = await featureStates.getValue();
-  return states[featureId] ?? false;
+// New plugin states — covers both collectors and behavior plugins
+export const pluginStates = storage.defineItem<PluginStates>(
+  "local:pluginStates",
+  { defaultValue: {} }
+);
+
+export async function isPluginEnabled(pluginId: string): Promise<boolean> {
+  const states = await pluginStates.getValue();
+  return states[pluginId] ?? false;
 }
 
-export async function setFeatureEnabled(
-  featureId: string,
+export async function setPluginEnabled(
+  pluginId: string,
   enabled: boolean
 ): Promise<void> {
-  const states = await featureStates.getValue();
-  await featureStates.setValue({ ...states, [featureId]: enabled });
+  const states = await pluginStates.getValue();
+  await pluginStates.setValue({ ...states, [pluginId]: enabled });
 }
 
 export const featureOptionStates = storage.defineItem<FeatureOptionStates>(
@@ -51,3 +58,18 @@ export const countryCache = storage.defineItem<CountryCache>(
   "local:countryCache",
   { defaultValue: {} }
 );
+
+/**
+ * One-time migration: copy featureStates into pluginStates if pluginStates
+ * is empty and featureStates has data.
+ */
+export async function migrateStorage(): Promise<void> {
+  const newStates = await pluginStates.getValue();
+  if (Object.keys(newStates).length > 0) return; // already migrated
+
+  const oldStates = await featureStates.getValue();
+  if (Object.keys(oldStates).length === 0) return; // nothing to migrate
+
+  console.log("[XES:storage] Migrating featureStates → pluginStates", oldStates);
+  await pluginStates.setValue(oldStates);
+}

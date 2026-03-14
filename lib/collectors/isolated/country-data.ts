@@ -1,17 +1,18 @@
 /**
- * Iframe-based country data lookup.
+ * ISOLATED world data collector: iframe-based country lookup.
  *
- * Loads a user's /about page in a hidden iframe to trigger X's
- * AboutAccountQuery, then scrapes the "Account based in [country]"
- * text from the rendered DOM.
+ * Loads a user's /about page in a hidden iframe to scrape
+ * "Account based in [country]" text. Results are published to the
+ * cache and persisted with a 7-day TTL.
  *
- * Requires declarativeNetRequest to strip X-Frame-Options: DENY.
+ * Requires declarativeNetRequest to strip X-Frame-Options headers.
  */
 
-import { countryCache } from "./storage";
-import type { CountryCacheEntry } from "./types";
+import type { DataCollector, CacheService } from "../../plugin-types";
+import { countryCache } from "../../storage";
+import type { CountryCacheEntry } from "../../types";
 
-const LOG = "[XES:country-lookup]";
+const LOG = "[XES:country-data]";
 const IFRAME_TIMEOUT = 15_000;
 const POLL_INTERVAL = 500;
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -19,6 +20,12 @@ const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 const pendingLookups = new Map<string, Promise<string | null>>();
 const memoryCache = new Map<string, string>();
 
+let cache: CacheService | null = null;
+
+/**
+ * Demand-driven country lookup. Called by behavior plugins that need
+ * country data for a given screen name.
+ */
 export async function lookupCountry(
   screenName: string
 ): Promise<string | null> {
@@ -31,6 +38,7 @@ export async function lookupCountry(
   const cached = await getCachedCountry(key);
   if (cached !== null) {
     memoryCache.set(key, cached);
+    if (cache) cache.set("country-data", key, cached);
     return cached;
   }
 
@@ -45,6 +53,7 @@ export async function lookupCountry(
     if (result) {
       memoryCache.set(key, result);
       await setCachedCountry(key, result);
+      if (cache) cache.set("country-data", key, result);
     }
     return result;
   } finally {
@@ -57,22 +66,25 @@ export function getCachedCountrySync(screenName: string): string | null {
 }
 
 async function getCachedCountry(key: string): Promise<string | null> {
-  const cache = await countryCache.getValue();
-  const entry = cache[key];
+  const cacheData = await countryCache.getValue();
+  const entry = cacheData[key];
   if (!entry) return null;
   if (Date.now() - entry.fetchedAt > CACHE_TTL) return null;
   return entry.country;
 }
 
-async function setCachedCountry(key: string, country: string): Promise<void> {
-  const cache = await countryCache.getValue();
-  cache[key] = { country, fetchedAt: Date.now() };
-  await countryCache.setValue(cache);
+async function setCachedCountry(
+  key: string,
+  country: string
+): Promise<void> {
+  const cacheData = await countryCache.getValue();
+  cacheData[key] = { country, fetchedAt: Date.now() };
+  await countryCache.setValue(cacheData);
 }
 
 async function doLookup(
   screenName: string,
-  key: string
+  _key: string
 ): Promise<string | null> {
   const iframe = document.createElement("iframe");
   iframe.style.cssText =
@@ -111,15 +123,9 @@ function waitForCountryData(
           const doc = iframe.contentDocument;
           if (!doc?.body) return;
 
-          // "Account based in" and country name are in separate child
-          // elements, so find the span with the label and read the
-          // parent's full textContent.
           const spans = doc.querySelectorAll("span");
           for (const span of spans) {
             if (span.textContent?.trim() === "Account based in") {
-              // The country name is in a sibling element; walk up
-              // until we find a container whose textContent includes
-              // both the label and the country name.
               let el: HTMLElement | null = span as HTMLElement;
               for (let i = 0; i < 5 && el; i++) {
                 el = el.parentElement;
@@ -148,3 +154,30 @@ function waitForCountryData(
     });
   });
 }
+
+const countryData: DataCollector = {
+  id: "country-data",
+  name: "Country Data Lookup",
+  description:
+    "Looks up account country via iframe-based /about page scraping",
+  category: "Data Sources",
+  defaultEnabled: true,
+  world: "isolated",
+
+  init(cacheService: CacheService) {
+    cache = cacheService;
+    console.log(LOG, "Init");
+
+    // Pre-populate cache with any existing memory cache entries
+    for (const [key, country] of memoryCache) {
+      cache.set("country-data", key, country);
+    }
+  },
+
+  cleanup() {
+    console.log(LOG, "Cleanup");
+    cache = null;
+  },
+};
+
+export default countryData;
