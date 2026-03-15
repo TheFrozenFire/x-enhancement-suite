@@ -4,6 +4,7 @@ import { getFeatureOption } from "../storage";
 const LOG = "[XES:remove-annoyances]";
 const STYLE_ID = "xes-remove-annoyances";
 const HIDDEN_ATTR = "data-xes-annoyance-hidden";
+const SIDEBAR_HIDDEN_ATTR = "data-xes-sidebar-hidden";
 
 let observer: MutationObserver | null = null;
 let scanInterval: ReturnType<typeof setInterval> | null = null;
@@ -122,16 +123,41 @@ function scanTextRules() {
     }
   }
 
-  // Sidebar: Live on X
+  // Sidebar widgets: hide everything except the search box and its spacer.
+  // Uses visibility+collapse instead of display:none because hiding children
+  // with display:none causes X to collapse the entire sidebar container.
   if (hideSidebarContent) {
-    const sidebarDivs = document.querySelectorAll<HTMLElement>(
-      '[data-testid="sidebarColumn"] div'
-    );
-    for (const div of sidebarDivs) {
-      if (div.hasAttribute(HIDDEN_ATTR)) continue;
-      const h2 = div.querySelector(":scope > div > h2");
-      if (h2?.textContent?.includes("Live on X")) {
-        hideCell(div, "sidebar-live");
+    const sidebar = document.querySelector<HTMLElement>('[data-testid="sidebarColumn"]');
+    if (sidebar) {
+      // Find the widget sibling container (first ancestor with many children)
+      const findWidgetContainer = (): HTMLElement | null => {
+        const walk = (el: HTMLElement): HTMLElement | null => {
+          if (el.children.length > 3) return el;
+          for (const child of Array.from(el.children) as HTMLElement[]) {
+            const r = walk(child);
+            if (r) return r;
+          }
+          return null;
+        };
+        return walk(sidebar);
+      };
+
+      const container = findWidgetContainer();
+      if (container) {
+        for (const child of Array.from(container.children) as HTMLElement[]) {
+          if (child.hasAttribute(SIDEBAR_HIDDEN_ATTR)) continue;
+
+          // Keep the search box (position:fixed with z-index) and its spacer
+          const isSearch = !!child.querySelector('[data-testid="SearchBox_Search_Input"]');
+          const cs = window.getComputedStyle(child);
+          const isFixedSpacer = cs.position === "fixed" && cs.zIndex === "2";
+          // The spacer is the empty relative-positioned sibling right after the fixed search
+          const isSpacer = !child.textContent?.trim() && child.offsetHeight < 60;
+
+          if (isSearch || isFixedSpacer || isSpacer) continue;
+
+          child.setAttribute(SIDEBAR_HIDDEN_ATTR, "sidebar");
+        }
       }
     }
   }
@@ -144,6 +170,12 @@ function buildCSS(): string {
 
   // Always hide JS-marked elements
   rules.push(`[${HIDDEN_ATTR}] { display: none !important; }`);
+
+  // Sidebar widgets use visibility+collapse to stay in layout flow
+  // (display:none triggers X's own CSS to hide the entire sidebar)
+  rules.push(
+    `[${SIDEBAR_HIDDEN_ATTR}] { visibility: hidden !important; max-height: 0 !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; }`
+  );
 
   if (hideFollowSuggestions) {
     rules.push(
@@ -173,16 +205,7 @@ function buildCSS(): string {
   if (hidePromotions) {
     rules.push(
       `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href="/i/verified-orgs-signup"])`,
-      `div:has(> div > div > aside[aria-label="Get Free Ad Credit"])`,
       `[aria-label="Timeline: Conversation"] a[href*="quick_promote_web"]`,
-    );
-  }
-
-  if (hideSidebarContent) {
-    rules.push(
-      `[data-testid="sidebarColumn"] div:has(> div > aside[aria-label="Who to follow"])`,
-      `[data-testid="sidebarColumn"] div:has(> section > div[aria-label="Timeline: Trending now"])`,
-      `[data-testid="sidebarColumn"] div:has(> div[data-testid="news_sidebar"])`,
     );
   }
 
@@ -215,6 +238,9 @@ function cleanupAll() {
   document
     .querySelectorAll<HTMLElement>(`[${HIDDEN_ATTR}]`)
     .forEach((el) => el.removeAttribute(HIDDEN_ATTR));
+  document
+    .querySelectorAll<HTMLElement>(`[${SIDEBAR_HIDDEN_ATTR}]`)
+    .forEach((el) => el.removeAttribute(SIDEBAR_HIDDEN_ATTR));
 }
 
 const removeAnnoyances: BehaviorPlugin = {
