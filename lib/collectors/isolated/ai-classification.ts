@@ -10,10 +10,12 @@
 import type { DataCollector, CacheService } from "../../plugin-types";
 import type { AiClassifier } from "../../ai/types";
 import { sendClassificationRequest } from "../../ai/client";
-import { aiProviderConfig, pluginStates } from "../../storage";
+import { aiProviderConfig, pluginStates, getFeatureOption } from "../../storage";
 
 const LOG = "[XES:ai-classification]";
+const INITIAL_DEBOUNCE_MS = 500;
 const DEBOUNCE_MS = 2000;
+const MAX_BATCH_SIZE = 50;
 
 // Auto-discover classifiers
 const classifierModules = import.meta.glob<{ default: AiClassifier }>(
@@ -27,6 +29,7 @@ const allClassifiers: AiClassifier[] = Object.values(classifierModules).map(
 
 let cache: CacheService | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let hasFiredFirst = false;
 let classifiedIds = new Set<string>();
 let lastPath = "";
 let tweetDataHandler: ((collectorId: string, key: string, value: unknown) => void) | null = null;
@@ -75,7 +78,7 @@ function getFocalTweetText(): { text: string; author: string } | null {
   return null;
 }
 
-function getUnclassifiedReplies(focalAuthor: string | null): Array<{ id: string; text: string }> {
+function getUnclassifiedReplies(focalAuthor: string | null, skipFiltered: boolean): Array<{ id: string; text: string }> {
   if (!cache) return [];
 
   const replies: Array<{ id: string; text: string }> = [];
@@ -92,6 +95,12 @@ function getUnclassifiedReplies(focalAuthor: string | null): Array<{ id: string;
       `[data-xes-tweet-id="${tweetId}"]`
     );
     if (article && isFocalArticle(article)) continue;
+
+    // Skip replies already collapsed by rule-based filters
+    if (skipFiltered && article?.hasAttribute("data-xes-low-engagement")) {
+      classifiedIds.add(tweetId);
+      continue;
+    }
 
     // Get reply text from the DOM
     if (article) {
@@ -120,6 +129,7 @@ async function runClassificationBatch() {
     console.log(LOG, "Path changed:", lastPath, "→", currentPath);
     lastPath = currentPath;
     classifiedIds.clear();
+    hasFiredFirst = false;
   }
 
   const focal = getFocalTweetText();
@@ -128,7 +138,10 @@ async function runClassificationBatch() {
     return;
   }
 
-  const replies = getUnclassifiedReplies(focal.author || null);
+  const classifyFiltered = await getFeatureOption<boolean>(
+    "ai-classification", "classify-filtered", false
+  );
+  const replies = getUnclassifiedReplies(focal.author || null, !classifyFiltered);
   if (replies.length === 0) {
     console.log(LOG, "No unclassified replies found");
     return;
@@ -140,6 +153,13 @@ async function runClassificationBatch() {
   for (const reply of replies) {
     classifiedIds.add(reply.id);
   }
+
+  // Split into chunks to avoid exceeding LLM output token limits
+  const chunks: Array<Array<{ id: string; text: string }>> = [];
+  for (let i = 0; i < replies.length; i += MAX_BATCH_SIZE) {
+    chunks.push(replies.slice(i, i + MAX_BATCH_SIZE));
+  }
+  console.log(LOG, "Split into", chunks.length, "chunk(s) of max", MAX_BATCH_SIZE);
 
   // Get provider config and enabled states
   const config = await aiProviderConfig.getValue();
@@ -166,99 +186,110 @@ async function runClassificationBatch() {
       continue;
     }
 
-    try {
-      const systemPrompt =
-        "You are a content classifier. For each reply (keyed by ID) to a focal tweet, " +
-        "answer the classification question with true or false. " +
-        "Respond ONLY with a JSON object mapping each reply ID to a boolean.";
+    let totalPositive = 0;
+    let totalProcessed = 0;
 
-      const repliesObj: Record<string, string> = {};
-      for (const r of replies) {
-        repliesObj[r.id] = r.text;
-      }
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
 
-      const userPrompt = JSON.stringify({
-        classification: classifier.prompt,
-        focal_tweet: focal.text,
-        replies: repliesObj,
-      });
-
-      const responseFormat = {
-        type: "json_schema",
-        json_schema: {
-          name: "classification_result",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: Object.fromEntries(
-              replies.map((r) => [r.id, { type: "boolean" }])
-            ),
-            required: replies.map((r) => r.id),
-            additionalProperties: false,
-          },
-        },
-      };
-
-      console.log(LOG, "Sending", classifier.id, "classification for", replies.length, "replies");
-
-      const response = await sendClassificationRequest(
-        provider,
-        systemPrompt,
-        userPrompt,
-        responseFormat
-      );
-
-      // Parse JSON object from response
-      let results: Record<string, boolean>;
       try {
-        results = JSON.parse(response);
-      } catch {
-        console.error(LOG, "Failed to parse JSON response:", response.substring(0, 200));
-        continue;
-      }
+        const systemPrompt =
+          "You are a content classifier. For each reply (keyed by ID) to a focal tweet, " +
+          "answer the classification question with true or false. " +
+          "Respond ONLY with a JSON object mapping each reply ID to a boolean.";
 
-      if (typeof results !== "object" || results === null) {
-        console.error(LOG, "Response is not a JSON object:", results);
-        continue;
-      }
+        const repliesObj: Record<string, string> = {};
+        for (const r of chunk) {
+          repliesObj[r.id] = r.text;
+        }
 
-      // Publish results to cache
-      let positiveCount = 0;
-      for (const reply of replies) {
-        if (!(reply.id in results)) continue;
-        let value = results[reply.id];
-        if (classifier.invertResult) value = !value;
-        if (value) positiveCount++;
-
-        const existing =
-          cache.get<Record<string, boolean>>("ai-classification", reply.id) ?? {};
-        cache.set("ai-classification", reply.id, {
-          ...existing,
-          [classifier.id]: value,
+        const userPrompt = JSON.stringify({
+          classification: classifier.prompt,
+          focal_tweet: focal.text,
+          replies: repliesObj,
         });
-      }
 
-      console.log(
-        LOG,
-        classifier.id,
-        "results:",
-        positiveCount,
-        "/",
-        replies.length,
-        "positive"
-      );
-    } catch (err) {
-      console.error(LOG, "Classification failed for", classifier.id, ":", err);
+        const responseFormat = {
+          type: "json_schema",
+          json_schema: {
+            name: "classification_result",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: Object.fromEntries(
+                chunk.map((r) => [r.id, { type: "boolean" }])
+              ),
+              required: chunk.map((r) => r.id),
+              additionalProperties: false,
+            },
+          },
+        };
+
+        console.log(LOG, "Sending", classifier.id, "chunk", ci + 1, "/", chunks.length, "with", chunk.length, "replies");
+
+        const response = await sendClassificationRequest(
+          provider,
+          systemPrompt,
+          userPrompt,
+          responseFormat
+        );
+
+        // Parse JSON object from response
+        let results: Record<string, boolean>;
+        try {
+          results = JSON.parse(response);
+        } catch {
+          console.error(LOG, "Failed to parse JSON response for chunk", ci + 1, ":", response.substring(0, 200));
+          continue;
+        }
+
+        if (typeof results !== "object" || results === null) {
+          console.error(LOG, "Response is not a JSON object for chunk", ci + 1, ":", results);
+          continue;
+        }
+
+        // Publish results to cache
+        for (const reply of chunk) {
+          if (!(reply.id in results)) continue;
+          let value = results[reply.id];
+          if (classifier.invertResult) value = !value;
+          if (value) totalPositive++;
+          totalProcessed++;
+
+          const existing =
+            cache.get<Record<string, boolean>>("ai-classification", reply.id) ?? {};
+          cache.set("ai-classification", reply.id, {
+            ...existing,
+            [classifier.id]: value,
+          });
+        }
+      } catch (err) {
+        console.error(LOG, "Classification failed for", classifier.id, "chunk", ci + 1, ":", err);
+      }
     }
+
+    console.log(
+      LOG,
+      classifier.id,
+      "results:",
+      totalPositive,
+      "/",
+      totalProcessed,
+      "positive"
+    );
   }
 }
 
 function scheduleBatch() {
-  if (debounceTimer) clearTimeout(debounceTimer);
+  // Throttle, not debounce: don't reset the timer on new events.
+  // This caps max wait for any reply at the throttle interval.
+  if (debounceTimer) return;
+  const delay = hasFiredFirst ? DEBOUNCE_MS : INITIAL_DEBOUNCE_MS;
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
+    hasFiredFirst = true;
     runClassificationBatch();
-  }, DEBOUNCE_MS);
+  }, delay);
 }
 
 const aiClassification: DataCollector = {
@@ -269,6 +300,16 @@ const aiClassification: DataCollector = {
   category: "Data Sources",
   defaultEnabled: true,
   world: "isolated",
+  options: [
+    {
+      id: "classify-filtered",
+      label: "Classify filtered replies",
+      description:
+        "Also run AI classification on replies already collapsed by rule-based filters (LE, LWC, etc.)",
+      type: "boolean",
+      defaultValue: false,
+    },
+  ],
 
   init(cacheService: CacheService) {
     cache = cacheService;
@@ -301,6 +342,7 @@ const aiClassification: DataCollector = {
     }
     cache = null;
     classifiedIds.clear();
+    hasFiredFirst = false;
     lastPath = "";
   },
 };
