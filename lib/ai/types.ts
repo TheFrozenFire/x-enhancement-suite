@@ -8,6 +8,7 @@ export interface AiProvider {
 export interface AiProviderConfig {
   fast?: AiProvider;
   smart?: AiProvider;
+  search?: AiProvider;
 }
 
 export interface AiClassifier {
@@ -15,7 +16,7 @@ export interface AiClassifier {
   name: string; // e.g., "Vitriol Detection"
   description: string;
   acronym: string; // e.g., "VIT" — shown in collapse reason
-  slot: "fast" | "smart";
+  slot: "fast" | "smart" | "search";
   defaultEnabled: boolean;
   // The classification question. Will be inserted into a standard prompt
   // template alongside the focal tweet and reply texts.

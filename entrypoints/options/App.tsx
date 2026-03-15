@@ -97,7 +97,7 @@ function App() {
   }
 
   async function handleProviderChange(
-    slot: "fast" | "smart",
+    slot: "fast" | "smart" | "search",
     field: keyof AiProvider,
     value: string | Record<string, unknown>
   ) {
@@ -219,10 +219,10 @@ function App() {
               AI Providers
             </h2>
             <p style={{ fontSize: 13, color: "#8b98a5", margin: "0 0 16px" }}>
-              Configure OpenAI-compatible LLM endpoints. The "fast" slot is used for high-volume tasks like reply classification. The "smart" slot is reserved for future deeper analysis features.
+              Configure OpenAI-compatible LLM endpoints. The "fast" slot is used for high-volume tasks like reply classification. The "smart" slot is reserved for future deeper analysis. The "search" slot powers X post search via Grok.
             </p>
 
-            {(["fast", "smart"] as const).map((slot) => {
+            {(["fast", "smart", "search"] as const).map((slot) => {
               const config = providerConfig[slot] ?? { endpoint: "", apiKey: "", model: "" };
               const isEmpty = !config.endpoint && !config.apiKey && !config.model;
               return (
