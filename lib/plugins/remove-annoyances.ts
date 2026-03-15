@@ -106,6 +106,20 @@ function scanTextRules() {
         hideCell(div, "promotions");
       }
     }
+
+    // Grok popover ("Talk to Grok" / "Customize Grok" + "Explore")
+    const grokButtons = document.querySelectorAll<HTMLElement>(
+      '[data-testid="primaryColumn"] button[role="button"]'
+    );
+    for (const btn of grokButtons) {
+      if (btn.hasAttribute(HIDDEN_ATTR)) continue;
+      if (
+        window.getComputedStyle(btn).position === "absolute" &&
+        btn.textContent?.includes("grok.com")
+      ) {
+        hideCell(btn, "promotions");
+      }
+    }
   }
 
   // Sidebar: Live on X
