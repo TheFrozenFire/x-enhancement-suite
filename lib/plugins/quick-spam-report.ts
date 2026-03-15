@@ -57,45 +57,33 @@ function findByText(
   return null;
 }
 
-async function runReportFlow(article: HTMLElement) {
-  // Step 1: Click the ... (caret) button to open the dropdown menu
-  const caret = article.querySelector<HTMLElement>('[data-testid="caret"]');
-  if (!caret) {
-    console.error(LOG, "No caret button found");
-    return;
-  }
-  console.log(LOG, "Opening dropdown menu");
-  caret.click();
+async function runSpamReport(menuOpener: () => void) {
+  // Step 1: Open menu and click Report
+  console.log(LOG, "Opening menu");
+  menuOpener();
 
-  // Step 2: Wait for and click "Report post"
   try {
     const reportItem = await waitForElement(document, '[data-testid="report"]');
-    console.log(LOG, "Clicking Report post");
+    console.log(LOG, "Clicking Report");
     reportItem.click();
   } catch {
-    // Fallback: find by text
-    const reportByText = findMenuItemByText("Report post");
+    const reportByText = findMenuItemByText("Report");
     if (reportByText) {
-      console.log(LOG, "Clicking Report post (by text)");
+      console.log(LOG, "Clicking Report (by text)");
       reportByText.click();
     } else {
-      console.error(LOG, "Could not find Report post menu item");
-      // Close the menu by pressing Escape
+      console.error(LOG, "Could not find Report menu item");
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       return;
     }
   }
 
-  // Step 3: Wait for the report modal, then click "Spam"
+  // Step 2: Wait for report modal, click Spam
   try {
-    // Look for the Spam option in the report dialog
     await waitForElement(document, '[role="dialog"], [data-testid="sheetDialog"]');
     console.log(LOG, "Report modal opened");
-
-    // Small delay for modal content to render
     await new Promise((r) => setTimeout(r, 500));
 
-    // Find and click "Spam"
     const spamOption = findByText(document, 'span', 'Spam');
     if (spamOption) {
       console.log(LOG, "Clicking Spam option");
@@ -105,7 +93,7 @@ async function runReportFlow(article: HTMLElement) {
       return;
     }
 
-    // Step 4: Wait a moment then click "Next"
+    // Step 3: Click Next
     await new Promise((r) => setTimeout(r, 500));
     const nextBtn = findByText(document, 'span', 'Next')
       ?? findByText(document, 'button', 'Next');
@@ -118,7 +106,7 @@ async function runReportFlow(article: HTMLElement) {
       return;
     }
 
-    // Step 5: Wait then click "Done"
+    // Step 4: Click Done
     await new Promise((r) => setTimeout(r, 1000));
     const doneBtn = findByText(document, 'span', 'Done')
       ?? findByText(document, 'button', 'Done');
@@ -129,7 +117,6 @@ async function runReportFlow(article: HTMLElement) {
       console.log(LOG, "Report flow complete");
     } else {
       console.error(LOG, "Could not find Done button, trying close");
-      // Try closing the modal via the X button
       const closeBtn = document.querySelector<HTMLElement>(
         '[data-testid="app-bar-close"]'
       );
@@ -140,15 +127,24 @@ async function runReportFlow(article: HTMLElement) {
   }
 }
 
-function addButton(article: HTMLElement) {
+// --- Reply spam report (tweet threads) ---
+
+async function runReplyReportFlow(article: HTMLElement) {
+  const caret = article.querySelector<HTMLElement>('[data-testid="caret"]');
+  if (!caret) {
+    console.error(LOG, "No caret button found");
+    return;
+  }
+  await runSpamReport(() => caret.click());
+}
+
+function addReplyButton(article: HTMLElement) {
   if (article.hasAttribute(MARKER)) return;
   article.setAttribute(MARKER, "true");
 
   const caret = article.querySelector('[data-testid="caret"]');
   if (!caret) return;
 
-  // The caret is inside: div > div > div > button[caret]
-  // We want to insert our button as a sibling of the caret's wrapper
   const caretWrapper = caret.parentElement?.parentElement?.parentElement;
   if (!caretWrapper?.parentElement) return;
 
@@ -160,7 +156,7 @@ function addButton(article: HTMLElement) {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     e.preventDefault();
-    runReportFlow(article);
+    runReplyReportFlow(article);
   });
 
   caretWrapper.parentElement.insertBefore(btn, caretWrapper.nextSibling);
@@ -171,14 +167,107 @@ function processArticles(root: Element | Document) {
     'article[data-testid="tweet"]'
   );
   for (const article of articles) {
-    // Skip the focal tweet
     if (
       article.querySelector('a[href*="/analytics"]') &&
       article.textContent?.includes("Views")
     ) {
       continue;
     }
-    addButton(article);
+    addReplyButton(article);
+  }
+}
+
+// --- Follower spam report (followers page) ---
+
+async function runFollowerReportFlow(cell: HTMLElement) {
+  const moreBtn = cell.querySelector<HTMLElement>('button[aria-label="More"]');
+  if (!moreBtn) {
+    console.error(LOG, "No More button found in follower cell");
+    return;
+  }
+
+  // Step 1: Report as spam
+  await runSpamReport(() => moreBtn.click());
+
+  // Step 2: Wait for report dialog to close
+  await new Promise((r) => setTimeout(r, 1000));
+
+  // Step 3: Open menu again and click "Remove this follower"
+  console.log(LOG, "Opening menu for Remove Follower");
+  moreBtn.click();
+
+  try {
+    const removeItem = await waitForElement(document, '[data-testid="removeFollower"]');
+    console.log(LOG, "Clicking Remove this follower");
+    removeItem.click();
+  } catch {
+    const removeByText = findMenuItemByText("Remove this follower");
+    if (removeByText) {
+      console.log(LOG, "Clicking Remove this follower (by text)");
+      removeByText.click();
+    } else {
+      console.error(LOG, "Could not find Remove this follower menu item");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return;
+    }
+  }
+
+  // Step 4: Confirm removal if a confirmation dialog appears
+  await new Promise((r) => setTimeout(r, 500));
+  const confirmBtn = findByText(document, 'span', 'Remove')
+    ?? findByText(document, 'button', 'Remove');
+  if (confirmBtn) {
+    console.log(LOG, "Confirming removal");
+    const btn = confirmBtn.closest('button') ?? confirmBtn;
+    (btn as HTMLElement).click();
+  }
+
+  console.log(LOG, "Follower report + remove complete");
+}
+
+function addFollowerButton(cell: HTMLElement) {
+  if (cell.hasAttribute(MARKER)) return;
+  cell.setAttribute(MARKER, "true");
+
+  const moreBtn = cell.querySelector<HTMLElement>('button[aria-label="More"]');
+  if (!moreBtn) return;
+
+  const btn = document.createElement("button");
+  btn.className = "xes-spam-report-btn";
+  btn.type = "button";
+  btn.title = "Report Spam & Remove Follower";
+  btn.textContent = "\uD83D\uDCA9";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    runFollowerReportFlow(cell);
+  });
+
+  // Insert next to the More button
+  moreBtn.parentElement!.insertBefore(btn, moreBtn.nextSibling);
+}
+
+function processFollowerCells(root: Element | Document) {
+  const cells = root.querySelectorAll<HTMLElement>(
+    '[data-testid="UserCell"]'
+  );
+  for (const cell of cells) {
+    const container = cell.closest<HTMLElement>('[data-testid="cellInnerDiv"]');
+    if (container) addFollowerButton(container);
+  }
+}
+
+// --- Shared ---
+
+function isFollowersPage() {
+  return /\/followers\b/.test(window.location.pathname);
+}
+
+function processAll(root: Element | Document) {
+  if (isFollowersPage()) {
+    processFollowerCells(root);
+  } else {
+    processArticles(root);
   }
 }
 
@@ -230,7 +319,7 @@ const quickSpamReport: BehaviorPlugin = {
   id: "quick-spam-report",
   name: "Quick Spam Report",
   description:
-    "Adds a one-click spam report button to replies",
+    "Adds a one-click spam report button to replies and follower lists",
   category: "Replies",
   defaultEnabled: true,
   depends: [],
@@ -238,20 +327,20 @@ const quickSpamReport: BehaviorPlugin = {
   async init(_cache: CacheService) {
     console.log(LOG, "Init");
     injectStyles();
-    processArticles(document);
+    processAll(document);
 
     observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const node of m.addedNodes) {
           if (node instanceof HTMLElement) {
-            processArticles(node);
+            processAll(node);
           }
         }
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    scanInterval = setInterval(() => processArticles(document), 2000);
+    scanInterval = setInterval(() => processAll(document), 2000);
   },
 
   cleanup: cleanupAll,
