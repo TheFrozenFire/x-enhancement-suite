@@ -59,6 +59,17 @@ export const aiProviderConfig = storage.defineItem<AiProviderConfig>(
   { defaultValue: {} }
 );
 
+// Grok search history
+export interface SearchHistoryEntry {
+  query: string;
+  timestamp: number;
+}
+
+export const grokSearchHistory = storage.defineItem<SearchHistoryEntry[]>(
+  "local:grokSearchHistory",
+  { defaultValue: [] }
+);
+
 // Country cache — keyed by lowercase screen name
 export const countryCache = storage.defineItem<CountryCache>(
   "local:countryCache",

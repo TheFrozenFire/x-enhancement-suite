@@ -125,6 +125,22 @@ Key GraphQL queries used by X on profile and tweet pages:
 - **`TweetDetail`** — focal tweet + replies on status pages. Loaded on navigation.
 - **`AboutAccountQuery`** — account transparency data ("Account based in [country]", creation date). **Loaded on demand** when hovering over the join date on a profile page, not on initial navigation.
 
+### Skinsuiting
+
+Plugins must reuse X's existing DOM elements rather than creating parallel UI. The principle: never create a new UX element when an existing X element can be repurposed.
+
+**Rules:**
+1. **Replace content, not containers.** Find X's existing element (listbox, panel, sidebar widget) and swap its inner content. Do not hide it and render a sibling.
+2. **Guard against X repopulation.** X's JS frequently re-renders its own elements. Use `MutationObserver` on the skinsuited container to re-clear when X pushes new children. An `isOurContent` flag prevents the observer from fighting your own writes.
+3. **Match existing styling.** Reuse X's CSS classes and DOM structure for injected items so they look native. Only add custom CSS when X has no applicable class.
+4. **Intercept, don't duplicate.** For interactive elements (forms, inputs), attach event listeners to X's existing elements with `{ capture: true }` to intercept before X's own handlers. Do not create shadow inputs or hidden forms.
+
+**Example — Grok Search:**
+- Attaches to `[data-testid="SearchBox_Search_Input"]` (X's search input)
+- Clears and replaces content inside `form[role="search"] [role="listbox"]` (X's typeahead dropdown)
+- Intercepts form submission on the existing `<form>` with `capture: true`
+- No custom dropdown elements created
+
 ### Adding a New Plugin
 
 1. **Data Collector**: Create a file in `lib/collectors/main/` or `lib/collectors/isolated/` exporting a `DataCollector` as default
