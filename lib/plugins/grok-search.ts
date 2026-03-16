@@ -5,20 +5,19 @@ import { sendSearchRequest, type SearchResult } from "../ai/client";
 
 const LOG = "[XES:grok-search]";
 const STYLE_ID = "xes-grok-search";
+const XES_ATTR = "data-xes";
 
 let observer: MutationObserver | null = null;
-let listboxObserver: MutationObserver | null = null;
 let searchProvider: AiProvider | null = null;
 let inputEl: HTMLInputElement | null = null;
 let focusHandler: (() => void) | null = null;
 let inputHandler: (() => void) | null = null;
 let submitHandler: ((e: Event) => void) | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-let isOurContent = false;
 let lastResults: SearchResult[] = [];
-let activeSearchId = 0; // monotonic counter to discard stale responses
+let activeSearchId = 0;
 
-// --- Listbox content replacement ---
+// --- Listbox helpers ---
 
 function getListbox(): HTMLElement | null {
   return document.querySelector<HTMLElement>(
@@ -26,150 +25,86 @@ function getListbox(): HTMLElement | null {
   );
 }
 
-function setListboxContent(html: string) {
+/** Remove only our injected elements from the listbox */
+function clearOurContent() {
+  const listbox = getListbox();
+  if (!listbox) return;
+  listbox.querySelectorAll(`[${XES_ATTR}]`).forEach((el) => el.remove());
+}
+
+/** Append elements to the listbox, marked with our attribute */
+function appendToListbox(html: string) {
   const listbox = getListbox();
   if (!listbox) return;
 
-  // Set up observer to re-apply our content when X repopulates
-  if (!listboxObserver) {
-    listboxObserver = new MutationObserver(() => {
-      if (!isOurContent && listbox.children.length > 0) {
-        console.log(LOG, "X repopulated listbox, re-applying our content");
-        isOurContent = true;
-        listbox.innerHTML = "";
-        renderCurrentState(listbox);
-        isOurContent = false;
-      }
-    });
-    listboxObserver.observe(listbox, { childList: true });
-    console.log(LOG, "Watching listbox for X repopulation");
+  // Clear any previous XES content
+  listbox.querySelectorAll(`[${XES_ATTR}]`).forEach((el) => el.remove());
+
+  // Parse and append
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const fragment = template.content;
+
+  // Mark all top-level children
+  for (const child of Array.from(fragment.children)) {
+    child.setAttribute(XES_ATTR, "");
   }
 
-  isOurContent = true;
-  listbox.innerHTML = html;
-  isOurContent = false;
+  listbox.appendChild(fragment);
 }
 
-// Track what to show so the mutation observer can re-render
-let currentState: "empty" | "loading" | "results" | "error" = "empty";
-let currentError = "";
-
-function renderCurrentState(listbox?: HTMLElement) {
-  const lb = listbox ?? getListbox();
-  if (!lb) return;
-
-  switch (currentState) {
-    case "empty":
-      lb.innerHTML = "";
-      break;
-    case "loading":
-      lb.innerHTML = buildLoadingHTML();
-      break;
-    case "error":
-      lb.innerHTML = buildErrorHTML(currentError);
-      break;
-    case "results":
-      lb.innerHTML = buildResultsHTML(lastResults);
-      attachResultClickHandlers();
-      break;
-  }
-}
-
-function replaceListboxContent() {
-  currentState = "empty";
-  lastResults = [];
-  setListboxContent("");
-  console.log(LOG, "Cleared listbox");
-}
+// --- Render functions ---
 
 function renderLoading() {
-  currentState = "loading";
-  const listbox = getListbox();
-  if (!listbox) return;
-  isOurContent = true;
-  listbox.innerHTML = buildLoadingHTML();
-  isOurContent = false;
   console.log(LOG, "Showing loading state");
+  appendToListbox(`<div role="option" ${XES_ATTR} style="padding: 12px 16px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="xes-grok-spinner"></div>
+      <span class="xes-grok-secondary">Searching...</span>
+    </div>
+  </div>`);
 }
 
 function renderError(msg: string) {
-  currentState = "error";
-  currentError = msg;
-  const listbox = getListbox();
-  if (!listbox) return;
-  isOurContent = true;
-  listbox.innerHTML = buildErrorHTML(msg);
-  isOurContent = false;
   console.log(LOG, "Showing error:", msg);
+  appendToListbox(`<div role="option" ${XES_ATTR} style="padding: 12px 16px;">
+    <span class="xes-grok-secondary">${escapeHTML(msg)}</span>
+  </div>`);
 }
 
 function renderResults(results: SearchResult[]) {
-  currentState = "results";
   lastResults = results;
-  const listbox = getListbox();
-  if (!listbox) return;
-  isOurContent = true;
-  listbox.innerHTML = buildResultsHTML(results);
-  attachResultClickHandlers();
-  isOurContent = false;
-  console.log(LOG, "Rendered", results.length, "results");
-}
 
-// --- HTML builders (matching X's typeahead item structure) ---
-
-function buildLoadingHTML(): string {
-  return `<div role="option" class="css-175oi2r r-1mmae3n r-3pj75a r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l" style="padding: 12px 16px;">
-    <div class="css-175oi2r r-18u37iz r-136ojw6" style="align-items: center; gap: 12px;">
-      <div class="xes-grok-spinner"></div>
-      <div class="css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41" style="color: rgb(113, 118, 123);">
-        <span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">Searching...</span>
-      </div>
-    </div>
-  </div>`;
-}
-
-function buildErrorHTML(msg: string): string {
-  return `<div role="option" class="css-175oi2r r-1mmae3n r-3pj75a r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l" style="padding: 12px 16px;">
-    <div class="css-175oi2r r-18u37iz r-136ojw6">
-      <div class="css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41" style="color: rgb(113, 118, 123);">
-        <span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">${escapeHTML(msg)}</span>
-      </div>
-    </div>
-  </div>`;
-}
-
-function buildResultsHTML(results: SearchResult[]): string {
   if (results.length === 0) {
-    return buildErrorHTML("No results found");
+    renderError("No results found");
+    return;
   }
 
-  return results.map((result, i) => {
-    const authorText = result.author ? escapeHTML(result.author) : "";
-    const excerptText = escapeHTML(result.text);
+  const html = results.map((result) => {
+    const author = result.author ? escapeHTML(result.author) : "";
+    const summary = escapeHTML(result.summary || result.text);
     const url = escapeHTML(result.url);
 
-    return `<div role="option" class="css-175oi2r r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l${i === 0 ? " r-1mmae3n r-3pj75a" : ""}" data-xes-result-url="${url}" style="cursor: pointer; padding: 12px 16px;">
-      <div class="css-175oi2r" style="gap: 2px;">
-        <div class="css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41" style="font-weight: 700;">
-          <span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">${authorText}</span>
-        </div>
-        <div class="css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41" style="color: rgb(231, 233, 234); -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;">
-          <span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">${excerptText}</span>
-        </div>
-      </div>
+    return `<div role="option" ${XES_ATTR} class="xes-grok-result" data-xes-url="${url}">
+      <div class="xes-grok-result-author">${author}</div>
+      <div class="xes-grok-result-summary">${summary}</div>
     </div>`;
   }).join("");
+
+  appendToListbox(html);
+  attachResultClickHandlers();
+  console.log(LOG, "Rendered", results.length, "results");
 }
 
 function attachResultClickHandlers() {
   const listbox = getListbox();
   if (!listbox) return;
 
-  listbox.querySelectorAll<HTMLElement>("[data-xes-result-url]").forEach((el) => {
+  listbox.querySelectorAll<HTMLElement>("[data-xes-url]").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const url = el.getAttribute("data-xes-result-url");
+      const url = el.getAttribute("data-xes-url");
       if (url) {
         console.log(LOG, "Navigating to result:", url);
         window.location.href = url;
@@ -192,15 +127,11 @@ function attachToInput(input: HTMLInputElement) {
   console.log(LOG, "Attaching to search input");
   inputEl = input;
 
-  // Focus handler — replace listbox content when it appears
   focusHandler = () => {
     // Small delay to let X render the listbox first
     setTimeout(() => {
       if (lastResults.length > 0) {
-        // Re-render previous results
         renderResults(lastResults);
-      } else {
-        replaceListboxContent();
       }
     }, 50);
   };
@@ -210,24 +141,29 @@ function attachToInput(input: HTMLInputElement) {
   inputHandler = () => {
     const query = input.value.trim();
     if (!query) {
-      replaceListboxContent();
+      clearOurContent();
+      lastResults = [];
       return;
     }
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       performSearch(query);
-    }, 500);
+    }, 800);
   };
   input.addEventListener("input", inputHandler);
 
-  // Submit handler — prevent X's default search
+  // Submit handler — prevent X's default search, trigger immediate search
   const form = input.closest<HTMLFormElement>("form");
   if (form) {
     submitHandler = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       console.log(LOG, "Intercepted form submit");
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
       const query = input.value.trim();
       if (query) performSearch(query);
     };
@@ -269,15 +205,12 @@ async function performSearch(query: string) {
   try {
     const results = await sendSearchRequest(searchProvider, query);
 
-    // Discard if a newer search has started
     if (searchId !== activeSearchId) {
       console.log(LOG, "Discarding stale search results for:", query);
       return;
     }
 
     renderResults(results);
-
-    // Save to search history
     saveSearchHistory(query);
   } catch (err) {
     if (searchId !== activeSearchId) return;
@@ -289,9 +222,7 @@ async function performSearch(query: string) {
 async function saveSearchHistory(query: string) {
   try {
     const history = await grokSearchHistory.getValue();
-    // Remove duplicate if exists
     const filtered = history.filter((e) => e.query !== query);
-    // Add to front, keep last 20
     const updated = [{ query, timestamp: Date.now() }, ...filtered].slice(0, 20);
     await grokSearchHistory.setValue(updated);
     console.log(LOG, "Saved search history, total:", updated.length);
@@ -307,19 +238,47 @@ function injectStyles() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
+    /* Hide X's native listbox children; our elements are exempted via [data-xes] */
+    form[role="search"] [role="listbox"] > *:not([data-xes]) {
+      display: none !important;
+    }
+
     @keyframes xes-spin {
       to { transform: rotate(360deg); }
     }
     .xes-grok-spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgb(113, 118, 123);
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--xes-secondary-color, rgb(113, 118, 123));
       border-top-color: rgb(29, 155, 240);
       border-radius: 50%;
       animation: xes-spin 0.6s linear infinite;
     }
-    [data-xes-result-url]:hover {
+    .xes-grok-secondary {
+      color: var(--xes-secondary-color, rgb(113, 118, 123));
+      font-size: 13px;
+    }
+    .xes-grok-result {
+      padding: 10px 16px;
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    .xes-grok-result:hover {
       background-color: rgba(231, 233, 234, 0.1);
+    }
+    .xes-grok-result-author {
+      font-size: 13px;
+      font-weight: 700;
+      color: inherit;
+    }
+    .xes-grok-result-summary {
+      font-size: 12px;
+      color: var(--xes-secondary-color, rgb(113, 118, 123));
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-top: 2px;
     }
   `;
   document.head.appendChild(style);
@@ -342,18 +301,16 @@ function cleanupAll() {
   console.log(LOG, "Cleanup");
   observer?.disconnect();
   observer = null;
-  listboxObserver?.disconnect();
-  listboxObserver = null;
   if (debounceTimer) {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
   detachFromInput();
+  clearOurContent();
   document.getElementById(STYLE_ID)?.remove();
   searchProvider = null;
   lastResults = [];
   activeSearchId = 0;
-  currentState = "empty";
 }
 
 const grokSearch: BehaviorPlugin = {

@@ -47,6 +47,7 @@ export interface SearchResult {
   url: string;
   author: string;
   text: string;
+  summary: string;
 }
 
 export async function sendSearchRequest(
@@ -58,7 +59,7 @@ export async function sendSearchRequest(
   const systemPrompt =
     "You are a search assistant for X/Twitter. The user will provide a search query. " +
     "Search X posts and return relevant results as JSON. " +
-    "Respond with a JSON object: { \"results\": [ { \"url\": \"full x.com post URL\", \"author\": \"@handle\", \"text\": \"brief excerpt\" } ] }. " +
+    "Respond with a JSON object: { \"results\": [ { \"url\": \"full x.com post URL\", \"author\": \"@handle\", \"text\": \"original post text\", \"summary\": \"1-sentence summary of why this result is relevant\" } ] }. " +
     "Return up to 10 results. If no results found, return { \"results\": [] }.";
 
   const response = await chrome.runtime.sendMessage<
@@ -84,6 +85,7 @@ export async function sendSearchRequest(
       url: String(r.url ?? ""),
       author: String(r.author ?? ""),
       text: String(r.text ?? ""),
+      summary: String(r.summary ?? ""),
     }));
     console.log(LOG, "Parsed", results.length, "search results");
     return results;
