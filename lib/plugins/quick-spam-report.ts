@@ -263,10 +263,14 @@ function isFollowersPage() {
   return /\/followers\b/.test(window.location.pathname);
 }
 
+function isThreadPage() {
+  return /\/status\//.test(window.location.pathname);
+}
+
 function processAll(root: Element | Document) {
   if (isFollowersPage()) {
     processFollowerCells(root);
-  } else {
+  } else if (isThreadPage()) {
     processArticles(root);
   }
 }
