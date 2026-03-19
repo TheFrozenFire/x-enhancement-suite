@@ -72,6 +72,32 @@ function renderError(msg: string) {
   </div>`);
 }
 
+function formatTimestamp(iso: string): string {
+  if (!iso) return "";
+  try {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return "";
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffH = diffMs / (1000 * 60 * 60);
+
+    if (diffH < 1) return `${Math.max(1, Math.floor(diffMs / 60000))}m`;
+    if (diffH < 24) return `${Math.floor(diffH)}h`;
+    if (diffH < 24 * 7) return `${Math.floor(diffH / 24)}d`;
+
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+  } catch {
+    return "";
+  }
+}
+
+function formatLikes(count: number): string {
+  if (!count || count <= 0) return "";
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  return String(count);
+}
+
 function renderResults(results: SearchResult[]) {
   lastResults = results;
 
@@ -84,9 +110,17 @@ function renderResults(results: SearchResult[]) {
     const author = result.author ? escapeHTML(result.author) : "";
     const summary = escapeHTML(result.summary || result.text);
     const url = escapeHTML(result.url);
+    const time = formatTimestamp(result.timestamp);
+    const likes = formatLikes(result.likes);
+
+    const metaParts = [author, time].filter(Boolean).join(" · ");
+    const likesHtml = likes ? `<span class="xes-grok-result-likes">♡ ${likes}</span>` : "";
 
     return `<div role="option" ${XES_ATTR} class="xes-grok-result" data-xes-url="${url}">
-      <div class="xes-grok-result-author">${author}</div>
+      <div class="xes-grok-result-header">
+        <span class="xes-grok-result-meta">${metaParts}</span>
+        ${likesHtml}
+      </div>
       <div class="xes-grok-result-summary">${summary}</div>
     </div>`;
   }).join("");
@@ -189,6 +223,17 @@ function detachFromInput() {
   submitHandler = null;
 }
 
+// --- User context ---
+
+function getLoggedInHandle(): string | null {
+  const link = document.querySelector<HTMLAnchorElement>(
+    'a[data-testid="AppTabBar_Profile_Link"]'
+  );
+  if (!link) return null;
+  const match = link.pathname.match(/^\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
 // --- Search execution ---
 
 async function performSearch(query: string) {
@@ -201,9 +246,10 @@ async function performSearch(query: string) {
   }
 
   const searchId = ++activeSearchId;
+  const userHandle = getLoggedInHandle();
 
   try {
-    const results = await sendSearchRequest(searchProvider, query);
+    const results = await sendSearchRequest(searchProvider, query, userHandle);
 
     if (searchId !== activeSearchId) {
       console.log(LOG, "Discarding stale search results for:", query);
@@ -266,10 +312,24 @@ function injectStyles() {
     .xes-grok-result:hover {
       background-color: rgba(231, 233, 234, 0.1);
     }
-    .xes-grok-result-author {
+    .xes-grok-result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .xes-grok-result-meta {
       font-size: 13px;
       font-weight: 700;
       color: inherit;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .xes-grok-result-likes {
+      font-size: 12px;
+      color: var(--xes-secondary-color, rgb(113, 118, 123));
+      white-space: nowrap;
+      margin-left: 8px;
     }
     .xes-grok-result-summary {
       font-size: 12px;

@@ -48,19 +48,35 @@ export interface SearchResult {
   author: string;
   text: string;
   summary: string;
+  timestamp: string;
+  likes: number;
 }
+
+const SEARCH_SYSTEM_PROMPT = `You are a search assistant for X/Twitter. Search X posts and return relevant results as JSON.
+
+Rules:
+- Prefer recent posts unless the query clearly references a historical event or time period.
+- Prefer posts with meaningful engagement over zero-engagement or spam posts.
+- Return one post per conversation thread — do not return multiple replies from the same thread.
+- URLs must use the format https://x.com/{handle}/status/{id}. Do not fabricate URLs.
+- The "summary" field should explain WHY this result is relevant to the query, not just restate the post content.
+- The "timestamp" field should be the post date in ISO 8601 format (e.g. "2026-03-15T14:30:00Z"). Use your best estimate if exact time is unknown.
+- The "likes" field should be the approximate like count as a number. Use 0 if unknown.
+
+Respond with: { "results": [ { "url": "...", "author": "@handle", "text": "original post text", "summary": "why this matches the query", "timestamp": "ISO 8601", "likes": 0 } ] }
+Return up to 10 results. If no results found, return { "results": [] }.`;
 
 export async function sendSearchRequest(
   provider: AiProvider,
-  query: string
+  query: string,
+  userHandle?: string | null
 ): Promise<SearchResult[]> {
-  console.log(LOG, "Sending search request to background");
+  console.log(LOG, "Sending search request to background, user:", userHandle ?? "unknown");
 
-  const systemPrompt =
-    "You are a search assistant for X/Twitter. The user will provide a search query. " +
-    "Search X posts and return relevant results as JSON. " +
-    "Respond with a JSON object: { \"results\": [ { \"url\": \"full x.com post URL\", \"author\": \"@handle\", \"text\": \"original post text\", \"summary\": \"1-sentence summary of why this result is relevant\" } ] }. " +
-    "Return up to 10 results. If no results found, return { \"results\": [] }.";
+  const userContext = userHandle
+    ? `\nThe person performing this search is @${userHandle}. This is context only — do NOT restrict results to their posts. Search all of X broadly.`
+    : "";
+  const systemPrompt = SEARCH_SYSTEM_PROMPT + userContext;
 
   const response = await chrome.runtime.sendMessage<
     ClassificationRequest,
@@ -86,6 +102,8 @@ export async function sendSearchRequest(
       author: String(r.author ?? ""),
       text: String(r.text ?? ""),
       summary: String(r.summary ?? ""),
+      timestamp: String(r.timestamp ?? ""),
+      likes: Number(r.likes) || 0,
     }));
     console.log(LOG, "Parsed", results.length, "search results");
     return results;
