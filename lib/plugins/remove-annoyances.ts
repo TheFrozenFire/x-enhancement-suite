@@ -33,6 +33,17 @@ function hideCellAndSiblings(cell: Element, reason: string, count: number) {
   }
 }
 
+/** Hide siblings forward until a cell containing a tweet article is found */
+function hideCellsUntilTweet(cell: Element, reason: string) {
+  hideCell(cell, reason);
+  let sibling = cell.nextElementSibling;
+  while (sibling) {
+    if (sibling.querySelector('article[data-testid="tweet"]')) break;
+    hideCell(sibling, reason);
+    sibling = sibling.nextElementSibling;
+  }
+}
+
 function hideCellAndAllFollowing(cell: Element, reason: string) {
   hideCell(cell, reason);
   let sibling = cell.nextElementSibling;
@@ -69,12 +80,15 @@ function scanTextRules() {
         hideCell(cell, "follow-suggestions");
         continue;
       }
-      if (cellHasText(cell, "div", "Click to Follow")) {
+      if (
+        !cell.querySelector('article') &&
+        cellHasText(cell, "div", "Click to Follow")
+      ) {
         hideCell(cell, "follow-suggestions");
         continue;
       }
       if (cellHasText(cell, "span", "Creators for you")) {
-        hideCellAndSiblings(cell, "follow-suggestions", 3);
+        hideCellsUntilTweet(cell, "follow-suggestions");
         continue;
       }
     }
@@ -82,7 +96,7 @@ function scanTextRules() {
     // Topic suggestions
     if (hideTopicSuggestions) {
       if (cellHasText(cell, "span", "Discover new Communities")) {
-        hideCellAndSiblings(cell, "topic-suggestions", 2);
+        hideCellsUntilTweet(cell, "topic-suggestions");
         continue;
       }
     }
@@ -177,34 +191,37 @@ function buildCSS(): string {
     `[${SIDEBAR_HIDDEN_ATTR}] { visibility: hidden !important; max-height: 0 !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; }`
   );
 
+  // Use wildcard to match both "Home timeline" and "Timeline: Your Home Timeline"
+  const TL = '[aria-label*="Home" i][aria-label*="timeline" i]';
+
   if (hideFollowSuggestions) {
     rules.push(
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(aside[aria-label="Who to follow"])`,
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href*="/i/connect_people"])`,
+      `${TL} [data-testid="cellInnerDiv"]:has(aside[aria-label="Who to follow"])`,
+      `${TL} [data-testid="cellInnerDiv"]:has(a[href*="/i/connect_people"])`,
     );
   }
 
   if (hideTopicSuggestions) {
     rules.push(
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href="/i/topics/pinned"])`,
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href="/i/topics/pinned"]) + div`,
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href="/i/topics/pinned"]) + div + div`,
+      `${TL} [data-testid="cellInnerDiv"]:has(a[href="/i/topics/pinned"])`,
+      `${TL} [data-testid="cellInnerDiv"]:has(a[href="/i/topics/pinned"]) + div`,
+      `${TL} [data-testid="cellInnerDiv"]:has(a[href="/i/topics/pinned"]) + div + div`,
     );
   }
 
   if (hideTrending) {
     rules.push(
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(button > a[href="/explore"])`,
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(button > a[href="/explore"]) + div`,
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(div[data-testid="trend"])`,
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href="/explore"])`,
-      `[aria-label="Home timeline"] [aria-label="Timeline: Trending now"] > div > div:nth-child(3)`,
+      `${TL} [data-testid="cellInnerDiv"]:has(button > a[href="/explore"])`,
+      `${TL} [data-testid="cellInnerDiv"]:has(button > a[href="/explore"]) + div`,
+      `${TL} [data-testid="cellInnerDiv"]:has(div[data-testid="trend"])`,
+      `${TL} [data-testid="cellInnerDiv"]:has(a[href="/explore"])`,
+      `${TL} [aria-label="Timeline: Trending now"] > div > div:nth-child(3)`,
     );
   }
 
   if (hidePromotions) {
     rules.push(
-      `[aria-label="Home timeline"] [data-testid="cellInnerDiv"]:has(a[href="/i/verified-orgs-signup"])`,
+      `${TL} [data-testid="cellInnerDiv"]:has(a[href="/i/verified-orgs-signup"])`,
       `[aria-label="Timeline: Conversation"] a[href*="quick_promote_web"]`,
     );
   }
